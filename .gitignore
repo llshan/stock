@@ -38,8 +38,8 @@ Thumbs.db
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Generated analytics files (optional - remove if you want to commit charts)
-# analytics/
+# Generated analytics files (excluded from repository)
+analytics/
 
 # Temporary files
 *.tmp
