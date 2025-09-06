@@ -405,36 +405,9 @@ class StockDataDownloader:
 def create_watchlist() -> List[str]:
     """创建需要关注的股票清单"""
     return [
-        # 大型科技股
         "AAPL",   # 苹果
-        "GOOGL",  # 谷歌
-        "MSFT",   # 微软
-        "AMZN",   # 亚马逊
-        "META",   # Meta
-        "TSLA",   # 特斯拉
-        "NVDA",   # 英伟达
-        
-        # 热门成长股
-        "NFLX",   # Netflix
-        "UBER",   # Uber
-        "ZOOM",   # Zoom
-        
-        # 中概股
-        "BABA",   # 阿里巴巴
-        "JD",     # 京东
-        "BIDU",   # 百度
-        
-        # 传统蓝筹股
-        "JPM",    # 摩根大通
-        "JNJ",    # 强生
-        "PG",     # 宝洁
-        "KO",     # 可口可乐
-        "WMT",    # 沃尔玛
-        
-        # 其他重要股票
-        "DIS",    # 迪士尼
-        "V",      # Visa
-        "MA"      # Mastercard
+        "GOOG",   # 谷歌
+        "LULU"    # Lululemon
     ]
 
 if __name__ == "__main__":

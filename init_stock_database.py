@@ -225,17 +225,9 @@ class StooqDatabaseInitializer:
 def create_default_watchlist() -> List[str]:
     """创建默认股票观察清单"""
     return [
-        # 大型科技股
-        "AAPL", "GOOGL", "MSFT", "AMZN", "META", "TSLA", "NVDA",
-        
-        # 热门成长股
-        "NFLX", "UBER", "ZOOM",
-        
-        # 传统蓝筹股
-        "JPM", "JNJ", "PG", "KO", "WMT",
-        
-        # 其他重要股票
-        "DIS", "V", "MA"
+        "AAPL",   # 苹果
+        "GOOG",   # 谷歌
+        "LULU"    # Lululemon
     ]
 
 def main():
