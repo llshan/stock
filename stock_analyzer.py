@@ -292,7 +292,7 @@ class StockAnalysisApp:
 if __name__ == "__main__":
     app = StockAnalysisApp()
     
-    symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
+    symbols = ["AAPL", "GOOGL", "LULU"]
     
     print("股票分析程序启动...")
     print(f"分析股票: {', '.join(symbols)}")
