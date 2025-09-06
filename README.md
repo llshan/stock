@@ -46,17 +46,16 @@ pip install -r requirements.txt
 
 ### 🔥 推荐：综合分析系统
 
-**演示数据版本 (推荐新用户):**
+**基本使用:**
 ```bash
 python comprehensive_analyzer.py
 ```
 
-**真实数据版本 (需要稳定网络):**
+**自定义分析:**
 ```python
 from comprehensive_analyzer import ComprehensiveStockAnalyzer
 
-# 使用真实数据
-analyzer = ComprehensiveStockAnalyzer(use_mock_data=False)
+analyzer = ComprehensiveStockAnalyzer()
 symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
 results = analyzer.run_comprehensive_analysis(symbols, period="1y")
 ```
@@ -84,38 +83,49 @@ health = analyzer.analyze_financial_health("AAPL")
 print(f"财务健康等级: {health['grade']}")
 ```
 
-### 🎯 自定义分析
+### 🎯 高级自定义
 
 ```python
 from comprehensive_analyzer import ComprehensiveStockAnalyzer
 
-# 创建分析器 (演示模式)
-analyzer = ComprehensiveStockAnalyzer(use_mock_data=True)
+# 创建分析器
+analyzer = ComprehensiveStockAnalyzer()
 
-# 自定义股票列表
-symbols = ["AAPL", "AMZN", "NFLX"]
+# 自定义股票列表和分析周期
+symbols = ["AAPL", "AMZN", "NFLX", "META", "NVDA"]
 results = analyzer.run_comprehensive_analysis(symbols, period="2y")
 
 # 查看分析结果
 for symbol, data in results.items():
     report = data['comprehensive_report']
     print(f"{symbol}: {report['overall_rating']} - {report['investment_recommendation']}")
+    
+    # 访问详细技术分析数据
+    tech = data['technical_analysis']
+    if 'error' not in tech:
+        print(f"  RSI: {tech['rsi']:.2f}, 趋势: {tech['trend']}")
+    
+    # 访问详细财务分析数据
+    fin = data['financial_analysis']
+    if 'error' not in fin:
+        ratios = fin['ratios']
+        print(f"  净利润率: {ratios.get('net_profit_margin', 0):.2f}%")
 ```
 
 ## 📁 输出文件
 
 程序会在 `analytics/` 文件夹中生成以下文件：
 
-### 🎯 综合分析输出 (推荐)
+### 🎯 综合分析输出
 **技术分析图表:**
-- `{股票代码}_candlestick_demo.html`: 交互式K线图
-- `{股票代码}_rsi_demo.png`: RSI指标图  
-- `{股票代码}_bollinger_demo.html`: 布林带图表
+- `{股票代码}_candlestick.html`: 交互式K线图
+- `{股票代码}_rsi.png`: RSI指标图  
+- `{股票代码}_bollinger.html`: 布林带图表
 
-**财务分析图表 (新增):**
-- `{股票代码}_revenue_trend_demo.html`: 营收趋势图
-- `{股票代码}_financial_metrics_demo.png`: 财务指标分析图
-- `{股票代码}_health_dashboard_demo.html`: 财务健康仪表盘
+**财务分析图表:**
+- `{股票代码}_revenue_trend.html`: 营收趋势图
+- `{股票代码}_financial_metrics.png`: 财务指标分析图
+- `{股票代码}_health_dashboard.html`: 财务健康仪表盘
 
 ### 📊 单独技术分析输出
 - `{股票代码}_candlestick.html`: K线图
@@ -152,9 +162,9 @@ Stock/
 ├── requirements.txt            # 依赖包列表
 ├── README.md                   # 项目说明文档
 └── analytics/                  # 📁 分析结果输出文件夹
-    ├── {股票}_candlestick_demo.html      # K线图
-    ├── {股票}_financial_metrics_demo.png # 财务指标图
-    ├── {股票}_health_dashboard_demo.html # 健康仪表盘
+    ├── {股票}_candlestick.html          # K线图
+    ├── {股票}_financial_metrics.png     # 财务指标图
+    ├── {股票}_health_dashboard.html     # 健康仪表盘
     └── ... (其他图表文件)
 ```
 
@@ -162,22 +172,22 @@ Stock/
 
 ### 网络问题
 如果遇到网络连接问题或 Yahoo Finance API 限制：
-```bash
-# 使用综合分析演示版本 (推荐)
-python comprehensive_analyzer.py
-```
+1. 检查网络连接是否正常
+2. 尝试更换网络环境
+3. 程序会自动重试并给出错误提示
 
 ### 常见问题
 1. **中文字体警告**: 属正常现象，不影响功能
-2. **数据获取超时**: 使用演示版本或检查网络连接
+2. **数据获取失败**: 检查股票代码是否正确，网络是否正常
 3. **图表无法显示**: 确保浏览器支持HTML5
+4. **财务数据缺失**: 某些股票可能没有完整的财务数据
 
 ## ⚠️ 重要声明
 
-1. **数据来源**: 真实数据来自 Yahoo Finance，可能有延迟
+1. **数据来源**: 数据来自 Yahoo Finance，可能有延迟或不完整
 2. **投资建议**: 本程序提供的分析仅供参考，不构成投资建议
 3. **风险提示**: 股市有风险，投资需谨慎
-4. **演示数据**: 模拟数据仅用于功能演示，不代表真实市场情况
+4. **数据准确性**: 请以官方财报和实时行情为准
 
 ## 🎓 学习价值
 

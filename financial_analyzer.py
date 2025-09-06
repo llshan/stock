@@ -407,58 +407,32 @@ class FinancialChartGenerator:
         except Exception as e:
             print(f"生成财务健康仪表盘时出错: {str(e)}")
 
-# 模拟财务数据生成器 (用于演示)
-class MockFinancialDataFetcher:
-    def generate_mock_financial_data(self, symbol: str) -> Dict:
-        """生成模拟财务数据"""
-        np.random.seed(hash(symbol) % 2**32)
-        
-        # 生成5年财务数据
-        years = [2019, 2020, 2021, 2022, 2023]
-        
-        # 模拟营收增长
-        base_revenue = np.random.uniform(10, 100) * 1e9  # 100亿到1000亿
-        revenues = []
-        for i, year in enumerate(years):
-            growth = np.random.uniform(-0.1, 0.15)  # -10%到15%增长
-            if i == 0:
-                revenues.append(base_revenue)
-            else:
-                revenues.append(revenues[-1] * (1 + growth))
-        
-        # 生成其他财务指标
-        net_margins = np.random.uniform(5, 20, 5)  # 净利润率5%-20%
-        net_incomes = [rev * margin / 100 for rev, margin in zip(revenues, net_margins)]
-        
-        mock_data = {
-            'symbol': symbol,
-            'years': years,
-            'revenues': revenues,
-            'net_incomes': net_incomes,
-            'net_margins': net_margins,
-            'ratios': {
-                'net_profit_margin': net_margins[-1],
-                'roe': np.random.uniform(8, 25),
-                'roa': np.random.uniform(3, 15),
-                'debt_ratio': np.random.uniform(20, 70),
-                'current_ratio': np.random.uniform(1.2, 3.0),
-                'pe_ratio': np.random.uniform(10, 35),
-                'pb_ratio': np.random.uniform(1, 8),
-                'market_cap': revenues[-1] * np.random.uniform(2, 10)
-            }
-        }
-        
-        return mock_data
 
 if __name__ == "__main__":
-    # 示例使用
+    # 财务分析模块测试
     print("财务分析模块测试...")
     
-    # 使用模拟数据进行测试
-    mock_fetcher = MockFinancialDataFetcher()
-    mock_data = mock_fetcher.generate_mock_financial_data("AAPL")
+    # 使用真实数据进行测试
+    fetcher = FinancialDataFetcher()
+    analyzer = FinancialAnalyzer(fetcher)
     
-    print(f"模拟数据生成成功: {mock_data['symbol']}")
-    print(f"最新营收: ${mock_data['revenues'][-1]/1e9:.2f}B")
-    print(f"净利润率: {mock_data['ratios']['net_profit_margin']:.2f}%")
-    print(f"ROE: {mock_data['ratios']['roe']:.2f}%")
+    symbol = "AAPL"
+    print(f"分析股票: {symbol}")
+    
+    # 获取财务比率
+    ratios_result = analyzer.calculate_financial_ratios(symbol)
+    if 'error' not in ratios_result:
+        ratios = ratios_result['ratios']
+        print(f"净利润率: {ratios.get('net_profit_margin', 0):.2f}%")
+        print(f"ROE: {ratios.get('roe', 0):.2f}%")
+        print(f"市盈率: {ratios.get('pe_ratio', 0):.2f}")
+    else:
+        print(f"分析失败: {ratios_result['error']}")
+    
+    # 财务健康评估
+    health_result = analyzer.analyze_financial_health(symbol)
+    if 'error' not in health_result:
+        print(f"财务健康等级: {health_result['grade']}")
+        print(f"健康评分: {health_result['health_score']}/100")
+    else:
+        print(f"健康评估失败: {health_result['error']}")
