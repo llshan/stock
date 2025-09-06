@@ -18,19 +18,25 @@ from analyzer.data_downloader import StockDataDownloader, create_watchlist
 from analyzer.database import StockDatabase
 
 class StockDataManager:
-    def __init__(self, db_path: str = "stock_data.db"):
+    def __init__(self, db_path: str = "stock_data.db", max_retries: int = 3, base_delay: int = 30):
         """初始化股票数据管理器"""
-        self.downloader = StockDataDownloader()
         self.database = StockDatabase(db_path)
+        self.downloader = StockDataDownloader(
+            database=self.database, 
+            max_retries=max_retries, 
+            base_delay=base_delay
+        )
         self.logger = logging.getLogger(__name__)
     
-    def download_and_store_stock(self, symbol: str, start_date: str = None) -> bool:
+    def download_and_store_stock(self, symbol: str, start_date: str = None, incremental: bool = True, use_retry: bool = True) -> bool:
         """下载并存储单个股票的数据"""
         try:
-            self.logger.info(f"🚀 处理股票: {symbol}")
+            mode_text = "增量更新" if incremental else "全量下载"
+            retry_text = "（启用重试）" if use_retry else ""
+            self.logger.info(f"🚀 处理股票: {symbol} ({mode_text}){retry_text}")
             
             # 下载综合数据
-            data = self.downloader.download_comprehensive_data(symbol, start_date)
+            data = self.downloader.download_comprehensive_data(symbol, start_date, incremental, use_retry)
             
             # 检查下载是否成功
             if 'error' in data:
@@ -46,17 +52,20 @@ class StockDataManager:
             self.logger.error(f"❌ 处理 {symbol} 时出错: {str(e)}")
             return False
     
-    def batch_download_and_store(self, symbols: List[str], start_date: str = None) -> Dict:
+    def batch_download_and_store(self, symbols: List[str], start_date: str = None, incremental: bool = True, use_retry: bool = True) -> Dict:
         """批量下载并存储股票数据"""
         results = {
             'total': len(symbols),
             'successful': 0,
             'failed': 0,
+            'skipped': 0,
             'details': {}
         }
         
-        self.logger.info(f"🎯 开始批量处理 {len(symbols)} 个股票")
-        print(f"\n📊 批量下载并存储股票数据")
+        mode_text = "增量更新" if incremental else "全量下载"
+        retry_text = "（启用重试）" if use_retry else ""
+        self.logger.info(f"🎯 开始批量处理 {len(symbols)} 个股票 ({mode_text}){retry_text}")
+        print(f"\n📊 批量{mode_text}股票数据{retry_text}")
         print(f"📅 数据时间范围: {start_date or '2020-01-01'} 至今")
         print(f"📈 股票数量: {len(symbols)}")
         print("=" * 60)
@@ -64,7 +73,7 @@ class StockDataManager:
         for i, symbol in enumerate(symbols):
             print(f"\n[{i+1}/{len(symbols)}] 处理 {symbol}...")
             
-            success = self.download_and_store_stock(symbol, start_date)
+            success = self.download_and_store_stock(symbol, start_date, incremental, use_retry)
             
             if success:
                 results['successful'] += 1
@@ -77,19 +86,64 @@ class StockDataManager:
         
         # 显示最终结果
         print("\n" + "=" * 60)
-        print("📊 批量处理结果:")
+        print(f"📊 批量{mode_text}结果:")
         print(f"✅ 成功: {results['successful']}")
         print(f"❌ 失败: {results['failed']}")
         print(f"📊 成功率: {results['successful']/results['total']*100:.1f}%")
         
         return results
     
-    def update_stock_data(self, symbol: str) -> bool:
-        """更新单个股票的数据"""
-        self.logger.info(f"🔄 更新 {symbol} 的数据...")
+    def update_stock_data(self, symbol: str, incremental: bool = True, use_retry: bool = True) -> bool:
+        """更新单个股票的数据（默认增量更新）"""
+        mode_text = "增量更新" if incremental else "全量更新" 
+        retry_text = "（启用重试）" if use_retry else ""
+        self.logger.info(f"🔄 {mode_text} {symbol} 的数据...{retry_text}")
         
-        # 重新下载并存储数据
-        return self.download_and_store_stock(symbol)
+        # 下载并存储数据（支持增量更新）
+        return self.download_and_store_stock(symbol, incremental=incremental, use_retry=use_retry)
+    
+    def get_existing_stocks_info(self) -> Dict:
+        """获取数据库中已有股票的信息"""
+        try:
+            existing_symbols = self.database.get_existing_symbols()
+            
+            info = {
+                'total_stocks': len(existing_symbols),
+                'symbols': existing_symbols,
+                'last_updates': {}
+            }
+            
+            # 获取每个股票的最后更新日期
+            for symbol in existing_symbols:
+                last_date = self.database.get_last_update_date(symbol)
+                info['last_updates'][symbol] = last_date
+            
+            return info
+            
+        except Exception as e:
+            self.logger.error(f"获取已有股票信息失败: {str(e)}")
+            return {'error': str(e)}
+    
+    def print_existing_stocks_info(self):
+        """打印已有股票信息"""
+        info = self.get_existing_stocks_info()
+        
+        if 'error' in info:
+            print(f"❌ 获取股票信息失败: {info['error']}")
+            return
+        
+        print("\n" + "=" * 60)
+        print("📊 数据库中已有股票信息")
+        print("=" * 60)
+        print(f"📈 总股票数量: {info['total_stocks']}")
+        
+        if info['symbols']:
+            print("\n📋 股票列表及最后更新日期:")
+            for symbol in sorted(info['symbols']):
+                last_update = info['last_updates'].get(symbol, '未知')
+                print(f"   {symbol}: {last_update}")
+        else:
+            print("\n📭 数据库中暂无股票数据")
     
     def generate_data_report(self) -> Dict:
         """生成数据质量报告"""
@@ -180,7 +234,7 @@ class StockDataManager:
 def main():
     """命令行主函数"""
     parser = argparse.ArgumentParser(description='股票数据管理器')
-    parser.add_argument('--action', '-a', choices=['download', 'update', 'report', 'backup'], 
+    parser.add_argument('--action', '-a', choices=['download', 'update', 'report', 'backup', 'info'], 
                        default='download', help='执行的操作')
     parser.add_argument('--symbols', '-s', nargs='+', help='股票代码列表')
     parser.add_argument('--start-date', '-d', default='2020-01-01', help='开始日期')
@@ -188,6 +242,11 @@ def main():
     parser.add_argument('--backup-path', help='备份文件路径')
     parser.add_argument('--use-watchlist', action='store_true', help='使用预设关注清单')
     parser.add_argument('--verbose', '-v', action='store_true', help='详细输出')
+    parser.add_argument('--full-download', action='store_true', help='强制全量下载（忽略增量更新）')
+    parser.add_argument('--incremental', action='store_true', default=True, help='使用增量下载（默认）')
+    parser.add_argument('--no-retry', action='store_true', help='禁用重试机制')
+    parser.add_argument('--max-retries', type=int, default=3, help='最大重试次数（默认3次）')
+    parser.add_argument('--retry-delay', type=int, default=30, help='重试基础延迟时间（秒，默认30）')
     
     args = parser.parse_args()
     
@@ -203,7 +262,15 @@ def main():
     print("=" * 50)
     
     # 创建数据管理器
-    manager = StockDataManager(args.db_path)
+    manager = StockDataManager(
+        db_path=args.db_path,
+        max_retries=args.max_retries,
+        base_delay=args.retry_delay
+    )
+    
+    # 确定下载模式和重试设置
+    incremental_mode = not args.full_download  # 如果指定了 --full-download，则不使用增量模式
+    use_retry = not args.no_retry  # 如果指定了 --no-retry，则不使用重试
     
     try:
         if args.action == 'download':
@@ -219,10 +286,17 @@ def main():
                 print("💡 示例用法:")
                 print("   python data_manager.py --use-watchlist")
                 print("   python data_manager.py --symbols AAPL GOOGL MSFT")
+                print("   python data_manager.py --use-watchlist --full-download  # 全量下载")
                 return
             
+            # 显示下载模式和重试设置
+            mode_text = "增量下载" if incremental_mode else "全量下载"
+            retry_text = f"重试机制（最大{args.max_retries}次，延迟{args.retry_delay}s）" if use_retry else "禁用重试"
+            print(f"🔄 下载模式: {mode_text}")
+            print(f"🔄 重试设置: {retry_text}")
+            
             # 执行批量下载
-            results = manager.batch_download_and_store(symbols, args.start_date)
+            results = manager.batch_download_and_store(symbols, args.start_date, incremental_mode, use_retry)
             
             # 显示数据报告
             manager.print_data_report()
@@ -230,14 +304,23 @@ def main():
         elif args.action == 'update':
             if not args.symbols:
                 print("❌ 更新操作需要指定股票代码")
+                print("💡 示例用法:")
+                print("   python data_manager.py --action update --symbols AAPL GOOGL")
+                print("   python data_manager.py --action update --symbols AAPL --full-download")
                 return
             
             for symbol in args.symbols:
-                success = manager.update_stock_data(symbol.upper())
+                success = manager.update_stock_data(symbol.upper(), incremental_mode, use_retry)
+                mode_text = "增量" if incremental_mode else "全量"
+                retry_text = "（重试）" if use_retry else ""
                 if success:
-                    print(f"✅ {symbol} 更新成功")
+                    print(f"✅ {symbol} {mode_text}更新成功{retry_text}")
                 else:
-                    print(f"❌ {symbol} 更新失败")
+                    print(f"❌ {symbol} {mode_text}更新失败{retry_text}")
+        
+        elif args.action == 'info':
+            # 显示数据库中已有股票信息
+            manager.print_existing_stocks_info()
         
         elif args.action == 'report':
             manager.print_data_report()

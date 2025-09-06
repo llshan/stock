@@ -71,7 +71,6 @@ class StockDatabase:
             adj_close REAL,
             volume INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (symbol) REFERENCES stocks (symbol),
             UNIQUE(symbol, date)
         )
         """
@@ -86,7 +85,6 @@ class StockDatabase:
             item_name TEXT,
             value REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (symbol) REFERENCES stocks (symbol),
             UNIQUE(symbol, statement_type, period_date, item_name)
         )
         """
@@ -100,8 +98,7 @@ class StockDatabase:
             status TEXT,
             data_points INTEGER,
             error_message TEXT,
-            download_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (symbol) REFERENCES stocks (symbol)
+            download_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
         
@@ -115,8 +112,7 @@ class StockDatabase:
             data_completeness REAL,
             quality_grade TEXT,
             issues TEXT,
-            assessment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (symbol) REFERENCES stocks (symbol)
+            assessment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
         
@@ -172,15 +168,16 @@ class StockDatabase:
             self.logger.error(f"存储 {symbol} 基本信息失败: {str(e)}")
             raise
     
-    def store_stock_prices(self, symbol: str, price_data: Dict):
+    def store_stock_prices(self, symbol: str, price_data: Dict, incremental: bool = True):
         """存储股票价格数据"""
         try:
-            # 清除已存在的数据
-            self.cursor.execute("DELETE FROM stock_prices WHERE symbol = ?", (symbol,))
+            if not incremental:
+                # 全量更新：清除已存在的数据
+                self.cursor.execute("DELETE FROM stock_prices WHERE symbol = ?", (symbol,))
             
-            # 插入新数据
+            # 插入新数据（使用 INSERT OR REPLACE 支持增量更新）
             sql = """
-            INSERT INTO stock_prices 
+            INSERT OR REPLACE INTO stock_prices 
             (symbol, date, open_price, high_price, low_price, close_price, adj_close, volume)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
@@ -208,7 +205,9 @@ class StockDatabase:
             
             self.cursor.executemany(sql, data_to_insert)
             self.connection.commit()
-            self.logger.info(f"✅ {symbol} 价格数据存储完成: {len(data_to_insert)} 条记录")
+            
+            update_type = "增量更新" if incremental else "全量更新"
+            self.logger.info(f"✅ {symbol} 价格数据{update_type}完成: {len(data_to_insert)} 条记录")
             
         except Exception as e:
             self.logger.error(f"存储 {symbol} 价格数据失败: {str(e)}")
@@ -308,9 +307,20 @@ class StockDatabase:
     def store_comprehensive_data(self, symbol: str, data: Dict):
         """存储综合数据（股票+财务）"""
         try:
-            self.logger.info(f"💾 开始存储 {symbol} 的综合数据")
+            is_incremental = data.get('stock_data', {}).get('incremental_update', False)
+            self.logger.info(f"💾 开始存储 {symbol} 的综合数据 ({'增量模式' if is_incremental else '全量模式'})")
             
-            # 存储股票基本信息
+            # 确保股票基本信息存在（避免外键约束问题）
+            self.store_stock_basic_info(symbol, {
+                'company_name': f'{symbol} Inc.',
+                'sector': 'Unknown',
+                'industry': 'Unknown',
+                'market_cap': 0,
+                'employees': 0,
+                'description': ''
+            })
+            
+            # 存储股票基本信息（如果有财务数据）
             if 'financial_data' in data and 'error' not in data['financial_data']:
                 basic_info = data['financial_data'].get('basic_info', {})
                 if basic_info:
@@ -319,14 +329,17 @@ class StockDatabase:
             # 存储股票价格数据
             if 'stock_data' in data and 'error' not in data['stock_data']:
                 price_data = data['stock_data'].get('price_data', {})
-                if price_data:
-                    self.store_stock_prices(symbol, price_data)
+                # 检查是否有新数据需要存储
+                if price_data and data['stock_data'].get('data_points', 0) > 0:
+                    self.store_stock_prices(symbol, price_data, incremental=is_incremental)
                     
-                # 记录价格数据下载日志
-                self.store_download_log(
-                    symbol, 'stock_prices', 'success', 
-                    data['stock_data'].get('data_points', 0)
-                )
+                    # 记录价格数据下载日志
+                    self.store_download_log(
+                        symbol, 'stock_prices', 'success', 
+                        data['stock_data'].get('data_points', 0)
+                    )
+                elif data['stock_data'].get('no_new_data'):
+                    self.logger.info(f"📊 {symbol} 无新数据需要更新")
             else:
                 # 记录失败日志
                 error_msg = data.get('stock_data', {}).get('error', '未知错误')
@@ -340,9 +353,10 @@ class StockDatabase:
                 statements_count = len(data['financial_data'].get('financial_statements', {}))
                 self.store_download_log(symbol, 'financial_data', 'success', statements_count)
             else:
-                # 记录失败日志
-                error_msg = data.get('financial_data', {}).get('error', '未知错误')
-                self.store_download_log(symbol, 'financial_data', 'failed', 0, error_msg)
+                # 记录失败日志，但仅在有stock基本信息时
+                if 'financial_data' in data:
+                    error_msg = data.get('financial_data', {}).get('error', '未知错误')
+                    self.store_download_log(symbol, 'financial_data', 'failed', 0, error_msg)
             
             # 存储数据质量评估
             if 'data_quality' in data:
@@ -413,6 +427,29 @@ class StockDatabase:
         """
         
         return pd.read_sql_query(sql, self.connection)
+    
+    def get_existing_symbols(self) -> List[str]:
+        """获取数据库中已存在的股票代码列表"""
+        try:
+            sql = "SELECT DISTINCT symbol FROM stock_prices ORDER BY symbol"
+            result = self.cursor.execute(sql).fetchall()
+            return [row[0] for row in result]
+        except Exception as e:
+            self.logger.error(f"获取已存在股票列表失败: {str(e)}")
+            return []
+    
+    def get_last_update_date(self, symbol: str) -> Optional[str]:
+        """获取指定股票的最后更新日期"""
+        try:
+            sql = "SELECT MAX(date) FROM stock_prices WHERE symbol = ?"
+            result = self.cursor.execute(sql, (symbol,)).fetchone()
+            
+            if result and result[0]:
+                return result[0]
+            return None
+        except Exception as e:
+            self.logger.error(f"获取 {symbol} 最后更新日期失败: {str(e)}")
+            return None
     
     def backup_database(self, backup_path: str):
         """备份数据库"""

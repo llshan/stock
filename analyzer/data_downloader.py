@@ -14,40 +14,138 @@ import logging
 import json
 
 class StockDataDownloader:
-    def __init__(self):
+    def __init__(self, database=None, max_retries=3, base_delay=30):
         """初始化股票数据下载器"""
         self.start_date = "2020-01-01"
         self.logger = logging.getLogger(__name__)
+        self.database = database  # 可选的数据库实例，用于增量更新
+        self.max_retries = max_retries  # 最大重试次数
+        self.base_delay = base_delay  # 基础延迟时间（秒）
+    
+    def _retry_with_backoff(self, func, symbol: str):
+        """带退避策略的重试机制"""
+        for attempt in range(self.max_retries):
+            try:
+                return func()
+            except Exception as e:
+                error_msg = str(e)
+                is_rate_limit = ("429" in error_msg or 
+                               "Too Many Requests" in error_msg or 
+                               "rate limit" in error_msg.lower())
+                
+                if is_rate_limit and attempt < self.max_retries - 1:
+                    delay = self.base_delay * (2 ** attempt)  # 指数退避
+                    self.logger.warning(f"⏰ {symbol} API限制，等待 {delay} 秒后重试 (尝试 {attempt + 1}/{self.max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    # 非限制类错误或已达最大重试次数
+                    raise e
         
-    def download_stock_data(self, symbol: str, start_date: str = None) -> Dict:
+        raise Exception(f"{symbol} 重试 {self.max_retries} 次后仍然失败")
+    
+    def _is_api_error_retryable(self, error: Exception) -> bool:
+        """判断错误是否可重试"""
+        error_msg = str(error)
+        retryable_patterns = [
+            "429",
+            "Too Many Requests", 
+            "timeout",
+            "connection",
+            "network",
+            "temporary"
+        ]
+        return any(pattern in error_msg.lower() for pattern in retryable_patterns)
+        
+    def get_last_update_date(self, symbol: str) -> Optional[str]:
+        """获取股票的最后更新日期"""
+        if not self.database:
+            return None
+        
+        try:
+            # 查询数据库中该股票的最新日期
+            query = "SELECT MAX(date) FROM stock_prices WHERE symbol = ?"
+            result = self.database.cursor.execute(query, (symbol,)).fetchone()
+            
+            if result and result[0]:
+                last_date = datetime.strptime(result[0], '%Y-%m-%d')
+                # 从最后一天的下一天开始下载，避免重复
+                next_date = last_date + timedelta(days=1)
+                return next_date.strftime('%Y-%m-%d')
+            
+            return None
+        except Exception as e:
+            self.logger.warning(f"获取 {symbol} 最后更新日期失败: {str(e)}")
+            return None
+
+    def download_stock_data(self, symbol: str, start_date: str = None, incremental: bool = True, use_retry: bool = True) -> Dict:
         """
         下载股票的历史价格数据
         
         Args:
             symbol: 股票代码
             start_date: 开始日期，默认2020-01-01
+            incremental: 是否进行增量下载
+            use_retry: 是否使用重试机制
             
         Returns:
             包含价格数据的字典
         """
+        def _download_data():
+            return self._download_stock_data_internal(symbol, start_date, incremental)
+        
+        if use_retry:
+            return self._retry_with_backoff(_download_data, symbol)
+        else:
+            return _download_data()
+    
+    def _download_stock_data_internal(self, symbol: str, start_date: str = None, incremental: bool = True) -> Dict:
+        """内部股票数据下载实现"""
         try:
-            if start_date is None:
+            # 如果启用增量下载且有数据库，尝试从最后更新日期开始
+            if incremental and self.database:
+                last_update = self.get_last_update_date(symbol)
+                if last_update:
+                    start_date = last_update
+                    self.logger.info(f"🔄 {symbol} 启用增量下载，从 {start_date} 开始")
+                elif start_date is None:
+                    start_date = self.start_date
+            elif start_date is None:
                 start_date = self.start_date
                 
             self.logger.info(f"📈 下载 {symbol} 股票数据 (从 {start_date})")
             
+            # 检查日期范围是否有效
+            today = datetime.now().strftime('%Y-%m-%d')
+            if start_date >= today:
+                self.logger.info(f"📊 {symbol} 数据已是最新，无需更新")
+                return {
+                    'symbol': symbol,
+                    'start_date': start_date,
+                    'end_date': today,
+                    'data_points': 0,
+                    'price_data': {
+                        'dates': [], 'open': [], 'high': [], 'low': [], 
+                        'close': [], 'volume': [], 'adj_close': []
+                    },
+                    'summary_stats': {},
+                    'downloaded_at': datetime.now().isoformat(),
+                    'incremental_update': True,
+                    'no_new_data': True
+                }
+            
             # 下载股票数据
             ticker = yf.Ticker(symbol)
-            hist_data = ticker.history(start=start_date, end=datetime.now().strftime('%Y-%m-%d'))
+            hist_data = ticker.history(start=start_date, end=today)
             
             if hist_data.empty:
-                return {'error': f'无法获取 {symbol} 的历史数据'}
+                return {'error': f'无法获取 {symbol} 的历史数据（时间范围: {start_date} 到 {today}）'}
             
             # 转换为字典格式
             stock_data = {
                 'symbol': symbol,
                 'start_date': start_date,
-                'end_date': datetime.now().strftime('%Y-%m-%d'),
+                'end_date': today,
                 'data_points': len(hist_data),
                 'price_data': {
                     'dates': [d.strftime('%Y-%m-%d') for d in hist_data.index],
@@ -65,7 +163,8 @@ class StockDataDownloader:
                     'total_volume': int(hist_data['Volume'].sum()),
                     'avg_volume': int(hist_data['Volume'].mean())
                 },
-                'downloaded_at': datetime.now().isoformat()
+                'downloaded_at': datetime.now().isoformat(),
+                'incremental_update': incremental and self.database is not None
             }
             
             self.logger.info(f"✅ {symbol} 数据下载完成: {len(hist_data)} 个数据点")
@@ -76,16 +175,27 @@ class StockDataDownloader:
             self.logger.error(error_msg)
             return {'error': error_msg}
     
-    def download_financial_data(self, symbol: str) -> Dict:
+    def download_financial_data(self, symbol: str, use_retry: bool = True) -> Dict:
         """
         下载股票的财务报表数据
         
         Args:
             symbol: 股票代码
+            use_retry: 是否使用重试机制
             
         Returns:
             包含财务数据的字典
         """
+        def _download_data():
+            return self._download_financial_data_internal(symbol)
+        
+        if use_retry:
+            return self._retry_with_backoff(_download_data, symbol)
+        else:
+            return _download_data()
+    
+    def _download_financial_data_internal(self, symbol: str) -> Dict:
+        """内部财务数据下载实现"""
         try:
             self.logger.info(f"💼 下载 {symbol} 财务报表数据")
             
@@ -168,27 +278,30 @@ class StockDataDownloader:
             self.logger.warning(f"处理财务报表 {statement_type} 时出错: {str(e)}")
             return {'error': f'处理 {statement_type} 失败: {str(e)}'}
     
-    def download_comprehensive_data(self, symbol: str, start_date: str = None) -> Dict:
+    def download_comprehensive_data(self, symbol: str, start_date: str = None, incremental: bool = True, use_retry: bool = True) -> Dict:
         """
         下载股票的综合数据（价格+财务）
         
         Args:
             symbol: 股票代码
             start_date: 开始日期
+            incremental: 是否进行增量下载
+            use_retry: 是否使用重试机制
             
         Returns:
             综合数据字典
         """
-        self.logger.info(f"🚀 开始下载 {symbol} 的综合数据")
+        retry_text = "（启用重试）" if use_retry else ""
+        self.logger.info(f"🚀 开始下载 {symbol} 的综合数据{'（增量模式）' if incremental else '（全量模式）'}{retry_text}")
         
         # 下载股票价格数据
-        stock_data = self.download_stock_data(symbol, start_date)
+        stock_data = self.download_stock_data(symbol, start_date, incremental, use_retry)
         
         # 添加延迟避免API限制
         time.sleep(1)
         
         # 下载财务数据
-        financial_data = self.download_financial_data(symbol)
+        financial_data = self.download_financial_data(symbol, use_retry)
         
         # 合并数据
         comprehensive_data = {
@@ -201,13 +314,15 @@ class StockDataDownloader:
         
         return comprehensive_data
     
-    def batch_download(self, symbols: List[str], start_date: str = None) -> Dict[str, Dict]:
+    def batch_download(self, symbols: List[str], start_date: str = None, incremental: bool = True, use_retry: bool = True) -> Dict[str, Dict]:
         """
         批量下载多个股票的数据
         
         Args:
             symbols: 股票代码列表
             start_date: 开始日期
+            incremental: 是否进行增量下载
+            use_retry: 是否使用重试机制
             
         Returns:
             所有股票数据的字典
@@ -215,13 +330,15 @@ class StockDataDownloader:
         results = {}
         total = len(symbols)
         
-        self.logger.info(f"🎯 开始批量下载 {total} 个股票的数据")
+        mode_text = "增量下载" if incremental else "全量下载"
+        retry_text = "（启用重试）" if use_retry else ""
+        self.logger.info(f"🎯 开始批量{mode_text} {total} 个股票的数据{retry_text}")
         
         for i, symbol in enumerate(symbols):
             self.logger.info(f"进度: [{i+1}/{total}] 处理 {symbol}")
             
             try:
-                results[symbol] = self.download_comprehensive_data(symbol, start_date)
+                results[symbol] = self.download_comprehensive_data(symbol, start_date, incremental, use_retry)
                 
                 # 添加延迟避免API限制
                 if i < total - 1:  # 最后一个不需要延迟
