@@ -1,11 +1,19 @@
 import os
+import sys
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# 导入现有模块
-from stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
-from financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
+# 处理相对导入和直接运行的问题
+if __name__ == "__main__":
+    # 当直接运行时，添加父目录到路径
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from analyzer.stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
+    from analyzer.financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
+else:
+    # 导入现有模块
+    from .stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
+    from .financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
 
 class ComprehensiveStockAnalyzer:
     def __init__(self):
@@ -24,8 +32,8 @@ class ComprehensiveStockAnalyzer:
         """运行综合分析"""
         results = {}
         
-        # 确保analytics目录存在
-        os.makedirs('analytics', exist_ok=True)
+        # 确保results目录存在
+        os.makedirs('results', exist_ok=True)
         
         print("=" * 60)
         print("🚀 启动综合股票分析系统")
@@ -46,22 +54,37 @@ class ComprehensiveStockAnalyzer:
             print("📈 进行财务分析...")
             financial_analysis = self._perform_financial_analysis(symbol)
             
-            # 3. 生成综合报告
+            # 3. 价格下跌检测
+            print("⚠️ 检查价格下跌...")
+            drop_check_1d = self.stock_analyzer.check_price_drop(symbol, days=1, threshold_percent=15.0)
+            drop_check_7d = self.stock_analyzer.check_price_drop(symbol, days=7, threshold_percent=20.0)
+            
+            if 'error' not in drop_check_1d and drop_check_1d['is_drop_alert']:
+                print(f"   🔴 1天警告: {drop_check_1d['alert_message']}")
+            if 'error' not in drop_check_7d and drop_check_7d['is_drop_alert']:
+                print(f"   🔴 7天警告: {drop_check_7d['alert_message']}")
+            if ('error' in drop_check_1d or not drop_check_1d['is_drop_alert']) and \
+               ('error' in drop_check_7d or not drop_check_7d['is_drop_alert']):
+                print("   ✅ 未发现显著价格下跌")
+            
+            # 4. 生成综合报告
             print("📋 生成综合报告...")
             comprehensive_report = self._generate_comprehensive_report(
-                symbol, technical_analysis, financial_analysis
+                symbol, technical_analysis, financial_analysis, drop_check_1d, drop_check_7d
             )
             
             results[symbol] = {
                 'technical_analysis': technical_analysis,
                 'financial_analysis': financial_analysis,
+                'drop_check_1d': drop_check_1d,
+                'drop_check_7d': drop_check_7d,
                 'comprehensive_report': comprehensive_report
             }
             
             print(f"✅ {symbol} 分析完成")
         
         print("\n" + "=" * 60)
-        print("🎉 所有分析完成！报告已保存到 analytics/ 文件夹")
+        print("🎉 所有分析完成！报告已保存到 results/ 文件夹")
         print("=" * 60)
         
         return results
@@ -88,13 +111,13 @@ class ComprehensiveStockAnalyzer:
                 # 生成技术分析图表
                 try:
                     self.stock_chart_generator.create_candlestick_chart(
-                        analysis['data'], symbol, f"analytics/{symbol}_candlestick.html"
+                        analysis['data'], symbol, f"results/{symbol}_candlestick.html"
                     )
                     self.stock_chart_generator.create_rsi_chart(
-                        analysis['data'], symbol, f"analytics/{symbol}_rsi.png"
+                        analysis['data'], symbol, f"results/{symbol}_rsi.png"
                     )
                     self.stock_chart_generator.create_bollinger_bands_chart(
-                        analysis['data'], symbol, f"analytics/{symbol}_bollinger.html"
+                        analysis['data'], symbol, f"results/{symbol}_bollinger.html"
                     )
                     print(f"   📊 技术分析图表已生成")
                 except Exception as e:
@@ -131,17 +154,17 @@ class ComprehensiveStockAnalyzer:
                 # 生成财务分析图表
                 try:
                     self.financial_chart_generator.create_profitability_chart(
-                        financial_analysis, f"analytics/{symbol}_financial_metrics.png"
+                        financial_analysis, f"results/{symbol}_financial_metrics.png"
                     )
                     
                     if 'error' not in health_data:
                         self.financial_chart_generator.create_financial_health_dashboard(
-                            health_data, f"analytics/{symbol}_health_dashboard.html"
+                            health_data, f"results/{symbol}_health_dashboard.html"
                         )
                         
                         # 生成营收趋势图
                         self.financial_chart_generator.create_revenue_trend_chart(
-                            financial_analysis, f"analytics/{symbol}_revenue_trend.html"
+                            financial_analysis, f"results/{symbol}_revenue_trend.html"
                         )
                     
                     print(f"   📊 财务分析图表已生成")
@@ -156,7 +179,8 @@ class ComprehensiveStockAnalyzer:
             print(f"   ❌ 财务分析失败: {str(e)}")
             return {'error': str(e)}
     
-    def _generate_comprehensive_report(self, symbol: str, technical_analysis: Dict, financial_analysis: Dict) -> Dict:
+    def _generate_comprehensive_report(self, symbol: str, technical_analysis: Dict, financial_analysis: Dict, 
+                                     drop_check_1d: Dict, drop_check_7d: Dict) -> Dict:
         """生成综合投资报告"""
         report = {
             'symbol': symbol,
@@ -186,6 +210,15 @@ class ComprehensiveStockAnalyzer:
                     report['key_strengths'].append('RSI显示超卖，可能反弹')
             else:
                 report['key_concerns'].append('技术分析数据不可用')
+            
+            # 价格下跌风险评估
+            if 'error' not in drop_check_1d and drop_check_1d['is_drop_alert']:
+                report['key_concerns'].append(f"1天内大幅下跌 ({abs(drop_check_1d['percent_change']):.1f}%)")
+                tech_score -= 10  # 扣分
+            
+            if 'error' not in drop_check_7d and drop_check_7d['is_drop_alert']:
+                report['key_concerns'].append(f"7天内大幅下跌 ({abs(drop_check_7d['percent_change']):.1f}%)")
+                tech_score -= 15  # 扣分更多
             
             # 财务面评分
             finance_score = 0
@@ -255,7 +288,7 @@ if __name__ == "__main__":
     # 创建分析器
     analyzer = ComprehensiveStockAnalyzer()
     
-    symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
+    symbols = ["AAPL", "GOOGL", "LULU"]
     
     print(f"开始分析股票: {', '.join(symbols)}")
     results = analyzer.run_comprehensive_analysis(symbols, period="6mo")
@@ -273,4 +306,4 @@ if __name__ == "__main__":
         print(f"   优势: {', '.join(report['key_strengths'][:2]) if report['key_strengths'] else '无'}")
         print(f"   风险: {', '.join(report['key_concerns'][:2]) if report['key_concerns'] else '无'}")
     
-    print(f"\n✅ 所有图表和报告已保存到 analytics/ 文件夹")
+    print(f"\n✅ 所有图表和报告已保存到 results/ 文件夹")

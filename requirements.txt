@@ -5,3 +5,9 @@ matplotlib==3.7.2
 plotly==5.15.0
 requests==2.31.0
 seaborn==0.12.2
+google-cloud-storage>=2.10.0
+functions-framework>=3.4.0
+kaleido>=0.2.1
+psycopg2-binary>=2.9.0
+google-cloud-sql-python-connector>=1.4.0
+sqlalchemy>=2.0.0

@@ -73,6 +73,143 @@ class StockAnalyzer:
         data['BB_Lower'] = data['BB_Middle'] - (data['Close'].rolling(window=period).std() * std_dev)
         return data
     
+    def check_price_drop(self, symbol: str, days: int = 1, threshold_percent: float = 15.0) -> Dict:
+        """
+        检查股票在指定天数内是否下跌超过阈值
+        
+        Args:
+            symbol: 股票代码
+            days: 检查的天数 (1 或 7)
+            threshold_percent: 下跌阈值百分比 (默认15%)
+            
+        Returns:
+            Dict: 包含检查结果的字典
+        """
+        try:
+            # 获取足够的历史数据
+            period = "1mo" if days <= 7 else "3mo"
+            data = self.data_fetcher.get_historical_data(symbol, period=period, interval="1d")
+            
+            if data.empty:
+                return {'error': f'无法获取 {symbol} 的历史数据'}
+            
+            if len(data) < days + 1:
+                return {'error': f'数据不足，无法计算 {days} 天的价格变化'}
+            
+            # 获取当前价格和N天前的价格
+            current_price = data['Close'].iloc[-1]
+            past_price = data['Close'].iloc[-(days + 1)]
+            
+            # 计算价格变化
+            price_change = current_price - past_price
+            percent_change = (price_change / past_price) * 100
+            
+            # 判断是否触发下跌警告
+            is_drop_alert = percent_change <= -threshold_percent
+            
+            # 获取期间的最高价和最低价
+            period_high = data['Close'].iloc[-days-1:].max()
+            period_low = data['Close'].iloc[-days-1:].min()
+            max_drop_from_high = ((current_price - period_high) / period_high) * 100
+            
+            return {
+                'symbol': symbol,
+                'days_checked': days,
+                'threshold_percent': threshold_percent,
+                'current_price': current_price,
+                'past_price': past_price,
+                'price_change': price_change,
+                'percent_change': percent_change,
+                'is_drop_alert': is_drop_alert,
+                'period_high': period_high,
+                'period_low': period_low,
+                'max_drop_from_high': max_drop_from_high,
+                'alert_message': self._generate_drop_alert_message(
+                    symbol, days, percent_change, threshold_percent, is_drop_alert
+                )
+            }
+            
+        except Exception as e:
+            return {'error': f'检查价格下跌时出错: {str(e)}'}
+    
+    def _generate_drop_alert_message(self, symbol: str, days: int, percent_change: float, 
+                                   threshold: float, is_alert: bool) -> str:
+        """生成下跌警告消息"""
+        if is_alert:
+            return f"⚠️ 警告: {symbol} 在过去 {days} 天下跌了 {abs(percent_change):.2f}%，超过了 {threshold}% 的警告阈值！"
+        else:
+            if percent_change < 0:
+                return f"📊 {symbol} 在过去 {days} 天下跌了 {abs(percent_change):.2f}%，未达到 {threshold}% 的警告阈值"
+            else:
+                return f"📈 {symbol} 在过去 {days} 天上涨了 {percent_change:.2f}%"
+    
+    def batch_check_price_drops(self, symbols: List[str], days: int = 1, 
+                               threshold_percent: float = 15.0) -> Dict[str, Dict]:
+        """
+        批量检查多只股票的价格下跌情况
+        
+        Args:
+            symbols: 股票代码列表
+            days: 检查的天数
+            threshold_percent: 下跌阈值百分比
+            
+        Returns:
+            Dict: 每只股票的检查结果
+        """
+        results = {}
+        alerts = []
+        
+        print(f"🔍 开始检查 {len(symbols)} 只股票在过去 {days} 天的价格变化...")
+        print(f"📉 警告阈值: 下跌超过 {threshold_percent}%")
+        print("-" * 60)
+        
+        for i, symbol in enumerate(symbols, 1):
+            print(f"[{i}/{len(symbols)}] 检查 {symbol}...")
+            
+            result = self.check_price_drop(symbol, days, threshold_percent)
+            results[symbol] = result
+            
+            if 'error' not in result:
+                print(f"  {result['alert_message']}")
+                
+                if result['is_drop_alert']:
+                    alerts.append({
+                        'symbol': symbol,
+                        'percent_change': result['percent_change'],
+                        'current_price': result['current_price'],
+                        'max_drop_from_high': result['max_drop_from_high']
+                    })
+            else:
+                print(f"  ❌ {result['error']}")
+            
+            # 避免API限制
+            if i < len(symbols):
+                time.sleep(1)
+        
+        # 打印汇总
+        print("\n" + "=" * 60)
+        print("📊 检查结果汇总")
+        print("=" * 60)
+        
+        if alerts:
+            print(f"⚠️  发现 {len(alerts)} 只股票触发下跌警告:")
+            for alert in alerts:
+                print(f"  🔴 {alert['symbol']}: {alert['percent_change']:.2f}% "
+                      f"(当前价格: ${alert['current_price']:.2f})")
+        else:
+            print("✅ 没有股票触发下跌警告")
+        
+        return {
+            'results': results,
+            'alerts': alerts,
+            'summary': {
+                'total_checked': len(symbols),
+                'alerts_count': len(alerts),
+                'threshold_used': threshold_percent,
+                'days_checked': days
+            }
+        }
+    
     def analyze_stock(self, symbol: str, period: str = "1y") -> Dict:
         data = self.data_fetcher.get_historical_data(symbol, period)
         if data.empty:
@@ -267,18 +404,18 @@ class StockAnalysisApp:
                 
                 try:
                     import os
-                    os.makedirs('analytics', exist_ok=True)
+                    os.makedirs('results', exist_ok=True)
                     
                     self.chart_generator.create_candlestick_chart(
-                        analysis['data'], symbol, f"analytics/{symbol}_candlestick.html"
+                        analysis['data'], symbol, f"results/{symbol}_candlestick.html"
                     )
                     self.chart_generator.create_rsi_chart(
-                        analysis['data'], symbol, f"analytics/{symbol}_rsi.png"
+                        analysis['data'], symbol, f"results/{symbol}_rsi.png"
                     )
                     self.chart_generator.create_bollinger_bands_chart(
-                        analysis['data'], symbol, f"analytics/{symbol}_bollinger.html"
+                        analysis['data'], symbol, f"results/{symbol}_bollinger.html"
                     )
-                    print(f"图表已生成: analytics/{symbol}_candlestick.html, analytics/{symbol}_rsi.png, analytics/{symbol}_bollinger.html")
+                    print(f"图表已生成: results/{symbol}_candlestick.html, results/{symbol}_rsi.png, results/{symbol}_bollinger.html")
                 except Exception as e:
                     print(f"图表生成失败: {str(e)}")
                 
@@ -290,13 +427,56 @@ class StockAnalysisApp:
         return results
 
 if __name__ == "__main__":
-    app = StockAnalysisApp()
+    print("=== 股票分析程序 ===")
     
-    symbols = ["AAPL", "GOOGL", "LULU"]
+    # 创建数据获取器和分析器
+    data_fetcher = StockDataFetcher()
+    analyzer = StockAnalyzer(data_fetcher)
+    
+    # 示例1: 技术分析
+    print("\n1️⃣ 技术分析示例")
+    print("-" * 30)
+    
+    app = StockAnalysisApp()
+    symbols = ["AAPL", "GOOGL", "MSFT"]
     
     print("股票分析程序启动...")
     print(f"分析股票: {', '.join(symbols)}")
     
     results = app.run_analysis(symbols, period="6mo")
+    print("技术分析完成！图表已保存到 results/ 目录。")
     
-    print("\n分析完成！图表已保存到当前目录。")
+    # 示例2: 价格下跌检测
+    print("\n2️⃣ 价格下跌检测示例")
+    print("-" * 30)
+    
+    # 单只股票检测
+    print("📊 单只股票检测:")
+    result = analyzer.check_price_drop("AAPL", days=1, threshold_percent=15.0)
+    if 'error' not in result:
+        print(f"✅ {result['alert_message']}")
+        print(f"   当前价格: ${result['current_price']:.2f}")
+        print(f"   价格变化: {result['percent_change']:.2f}%")
+    else:
+        print(f"❌ {result['error']}")
+    
+    print("\n📊 批量检测示例 (检查1天价格变化):")
+    watch_list = ["AAPL", "GOOGL", "MSFT", "TSLA", "AMZN"]
+    batch_results = analyzer.batch_check_price_drops(watch_list, days=1, threshold_percent=10.0)
+    
+    print("\n📊 批量检测示例 (检查7天价格变化):")
+    batch_results_7d = analyzer.batch_check_price_drops(watch_list, days=7, threshold_percent=15.0)
+    
+    print("\n=== 使用方法说明 ===")
+    print("💡 价格下跌检测功能使用方法:")
+    print("   • check_price_drop(symbol, days=1, threshold_percent=15.0)")
+    print("   • batch_check_price_drops(symbols, days=1, threshold_percent=15.0)")
+    print("   • days: 检查天数 (1天或7天)")
+    print("   • threshold_percent: 警告阈值 (默认15%)")
+    print("\n📈 示例代码:")
+    print("   from stock_analyzer import StockDataFetcher, StockAnalyzer")
+    print("   data_fetcher = StockDataFetcher()")
+    print("   analyzer = StockAnalyzer(data_fetcher)")
+    print("   result = analyzer.check_price_drop('AAPL', days=1, threshold_percent=15.0)")
+    print("   if result['is_drop_alert']:")
+    print("       print(f'警告: {result['alert_message']}')")

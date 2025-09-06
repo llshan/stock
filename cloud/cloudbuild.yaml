@@ -1,0 +1,44 @@
+# Google Cloud Build 配置文件
+# 用于自动部署 Cloud Function
+
+steps:
+  # 部署 Cloud Function
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'functions'
+      - 'deploy'
+      - 'stock-analysis-job'
+      - '--source=.'
+      - '--entry-point=stock_analysis_job'
+      - '--runtime=python39'
+      - '--trigger-http'
+      - '--allow-unauthenticated'
+      - '--memory=512MB'
+      - '--timeout=540s'
+      - '--set-env-vars=GCS_BUCKET_NAME=${_BUCKET_NAME},STOCK_SYMBOLS=${_STOCK_SYMBOLS}'
+      - '--region=${_REGION}'
+
+  # 创建 Cloud Scheduler 任务
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args:
+      - 'scheduler'
+      - 'jobs'
+      - 'create'
+      - 'http'
+      - 'stock-analysis-scheduler'
+      - '--schedule=0 */1 * * *'  # 每小时执行一次
+      - '--uri=https://${_REGION}-${PROJECT_ID}.cloudfunctions.net/stock-analysis-job'
+      - '--http-method=POST'
+      - '--headers=Content-Type=application/json'
+      - '--data={}'
+      - '--time-zone=Asia/Shanghai'
+      - '--description=每小时执行股票分析任务'
+      - '--location=${_REGION}'
+
+substitutions:
+  _REGION: 'us-central1'
+  _BUCKET_NAME: 'stock-analysis-results-${PROJECT_ID}'
+  _STOCK_SYMBOLS: 'AAPL,GOOGL,MSFT,AMZN,META,TSLA,NVDA,NFLX,UBER,BABA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

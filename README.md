@@ -29,12 +29,19 @@
    - 财务指标对比图
    - 健康评分仪表盘
 
-### 🎯 综合分析系统 (新增)
+### 🎯 综合分析系统
 1. **技术+财务双重分析**：结合价格走势和基本面
 2. **智能评级系统**：A-F五级评定
 3. **投资建议生成**：买入/持有/卖出建议
 4. **风险提示**：识别潜在投资风险
 5. **综合报告**：生成专业投资分析报告
+
+### 💾 历史数据管理系统 (新增)
+1. **完整数据下载**：从2020年开始的所有价格和财务数据
+2. **结构化存储**：SQLite/PostgreSQL数据库存储
+3. **数据质量监控**：自动评估数据完整性和质量
+4. **批量管理**：支持多股票批量下载和更新
+5. **GCP云端部署**：支持Cloud SQL数据库
 
 ## 安装依赖
 
@@ -48,12 +55,12 @@ pip install -r requirements.txt
 
 **基本使用:**
 ```bash
-python comprehensive_analyzer.py
+python analyzer/comprehensive_analyzer.py
 ```
 
 **自定义分析:**
 ```python
-from comprehensive_analyzer import ComprehensiveStockAnalyzer
+from analyzer import ComprehensiveStockAnalyzer
 
 analyzer = ComprehensiveStockAnalyzer()
 symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
@@ -63,13 +70,13 @@ results = analyzer.run_comprehensive_analysis(symbols, period="1y")
 ### 📊 单独技术分析
 
 ```bash
-python stock_analyzer.py
+python analyzer/stock_analyzer.py
 ```
 
 ### 💼 单独财务分析
 
 ```python
-from financial_analyzer import FinancialAnalyzer, FinancialDataFetcher
+from analyzer import FinancialAnalyzer, FinancialDataFetcher
 
 fetcher = FinancialDataFetcher()
 analyzer = FinancialAnalyzer(fetcher)
@@ -83,10 +90,75 @@ health = analyzer.analyze_financial_health("AAPL")
 print(f"财务健康等级: {health['grade']}")
 ```
 
+### ⚠️ 价格下跌监控
+
+价格下跌监控功能已集成在技术分析和综合分析中：
+
+```python
+from analyzer import StockAnalyzer, StockDataFetcher
+
+# 创建分析器
+fetcher = StockDataFetcher()
+analyzer = StockAnalyzer(fetcher)
+
+# 单个股票下跌检测
+result = analyzer.check_price_drop('AAPL', days=1, threshold_percent=15.0)
+if result['is_drop_alert']:
+    print(f"警告: {result['alert_message']}")
+
+# 批量股票下跌检测
+symbols = ['AAPL', 'GOOGL', 'MSFT']
+results = analyzer.batch_check_price_drops(symbols, days=1, threshold_percent=15.0)
+print(f"发现 {results['summary']['alerts_count']} 只股票触发警告")
+```
+
+### 💾 历史数据管理
+
+**下载完整历史数据:**
+```bash
+# 下载预设观察清单的所有数据（从2020年开始）
+python data_manager.py --use-watchlist --action download
+
+# 下载特定股票的数据
+python data_manager.py --symbols AAPL GOOGL MSFT --action download
+
+# 更新已有股票的数据
+python data_manager.py --symbols AAPL --action update
+```
+
+**数据质量报告:**
+```bash
+# 生成数据质量报告
+python data_manager.py --action report
+
+# 备份数据库
+python data_manager.py --action backup --backup-path backup.db
+```
+
+**编程方式使用:**
+```python
+from analyzer import StockDataDownloader, StockDatabase
+
+# 创建下载器和数据库
+downloader = StockDataDownloader()
+database = StockDatabase("my_stock_data.db")
+
+# 下载并存储数据
+symbols = ['AAPL', 'GOOGL', 'MSFT']
+for symbol in symbols:
+    data = downloader.download_comprehensive_data(symbol, start_date="2020-01-01")
+    if 'error' not in data:
+        database.store_comprehensive_data(symbol, data)
+
+# 查询历史数据
+price_data = database.get_stock_prices('AAPL', '2023-01-01', '2023-12-31')
+financial_data = database.get_financial_data('AAPL', 'income_statement')
+```
+
 ### 🎯 高级自定义
 
 ```python
-from comprehensive_analyzer import ComprehensiveStockAnalyzer
+from analyzer import ComprehensiveStockAnalyzer
 
 # 创建分析器
 analyzer = ComprehensiveStockAnalyzer()
@@ -114,7 +186,7 @@ for symbol, data in results.items():
 
 ## 📁 输出文件
 
-程序会在 `analytics/` 文件夹中生成以下文件：
+程序会在 `results/` 文件夹中生成以下文件：
 
 ### 🎯 综合分析输出
 **技术分析图表:**
@@ -156,17 +228,38 @@ for symbol, data in results.items():
 
 ```
 Stock/
-├── comprehensive_analyzer.py    # 🔥 综合分析系统 (主程序)
-├── financial_analyzer.py       # 💼 财务分析模块
-├── stock_analyzer.py           # 📊 技术分析模块
+├── 📊 analyzer/                 # 核心分析模块包
+│   ├── __init__.py                     # 包初始化
+│   ├── stock_analyzer.py               # 📈 技术分析模块 (含价格下跌监控)
+│   ├── financial_analyzer.py           # 💼 财务分析模块
+│   ├── comprehensive_analyzer.py       # 🔥 综合分析系统
+│   ├── data_downloader.py              # 💾 历史数据下载器
+│   ├── database.py                     # 🗄️ 数据库存储模块
+│   └── README.md                       # 模块说明文档
+├── 🌥️ cloud/                   # GCP 部署文件夹
+│   ├── deploy.sh                       # 🚀 自动部署脚本
+│   ├── monitor.sh                      # 📊 系统监控脚本
+│   ├── test_local.py                   # 🧪 本地测试脚本
+│   ├── cloudbuild.yaml                 # ☁️ Cloud Build 配置
+│   ├── database_setup.py               # 🗄️ GCP数据库配置
+│   ├── GCP_DEPLOYMENT_GUIDE.md         # 📖 GCP 部署指南
+│   └── README.md                       # Cloud 目录说明
+├── main.py                      # 🌥️ GCP Cloud Function 入口点
+├── data_manager.py              # 📊 数据管理命令行工具
+├── data_downloader_function.py # 💾 独立数据下载Cloud Function
 ├── requirements.txt            # 依赖包列表
-├── README.md                   # 项目说明文档
-└── analytics/                  # 📁 分析结果输出文件夹
+├── README.md                   # 项目说明文档 (本文件)
+└── results/                    # 📁 分析结果输出文件夹
     ├── {股票}_candlestick.html          # K线图
     ├── {股票}_financial_metrics.png     # 财务指标图
     ├── {股票}_health_dashboard.html     # 健康仪表盘
     └── ... (其他图表文件)
 ```
+
+**💡 为什么 `main.py` 在根目录？**
+- `main.py` 是 GCP Cloud Function 的入口点，需要能够导入 `analyzer` 包
+- GCP 部署时会包含整个项目根目录，确保所有模块都可用
+- 这样的结构使得本地开发和云端部署都能正常工作
 
 ## 🔧 故障排除
 
