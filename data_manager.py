@@ -16,16 +16,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from analyzer.data_downloader import StockDataDownloader, create_watchlist
 from analyzer.database import StockDatabase
+from analyzer.hybrid_downloader import HybridStockDownloader
 
 class StockDataManager:
-    def __init__(self, db_path: str = "stock_data.db", max_retries: int = 3, base_delay: int = 30):
+    def __init__(self, db_path: str = "stock_data.db", max_retries: int = 3, base_delay: int = 30, use_hybrid: bool = True):
         """初始化股票数据管理器"""
         self.database = StockDatabase(db_path)
-        self.downloader = StockDataDownloader(
-            database=self.database, 
-            max_retries=max_retries, 
-            base_delay=base_delay
-        )
+        self.use_hybrid = use_hybrid
+        
+        if use_hybrid:
+            # 使用混合下载器（推荐）
+            self.downloader = HybridStockDownloader(self.database, max_retries, base_delay)
+        else:
+            # 使用传统yfinance下载器
+            self.downloader = StockDataDownloader(
+                database=self.database, 
+                max_retries=max_retries, 
+                base_delay=base_delay
+            )
         self.logger = logging.getLogger(__name__)
     
     def download_and_store_stock(self, symbol: str, start_date: str = None, incremental: bool = True, use_retry: bool = True) -> bool:
@@ -35,16 +43,24 @@ class StockDataManager:
             retry_text = "（启用重试）" if use_retry else ""
             self.logger.info(f"🚀 处理股票: {symbol} ({mode_text}){retry_text}")
             
-            # 下载综合数据
-            data = self.downloader.download_comprehensive_data(symbol, start_date, incremental, use_retry)
+            if self.use_hybrid:
+                # 使用混合下载器（自动选择策略）
+                self.logger.info(f"🔄 使用混合策略处理 {symbol}")
+                data = self.downloader.download_stock_data(symbol, start_date or "2000-01-01")
+            else:
+                # 下载综合数据（传统方式）
+                data = self.downloader.download_comprehensive_data(symbol, start_date, incremental, use_retry)
             
             # 检查下载是否成功
             if 'error' in data:
                 self.logger.error(f"❌ {symbol} 下载失败: {data['error']}")
                 return False
             
-            # 存储到数据库
-            self.database.store_comprehensive_data(symbol, data)
+            # 对于混合下载器，数据已经在下载过程中存储
+            if not self.use_hybrid:
+                # 存储到数据库（仅限传统下载器）
+                self.database.store_comprehensive_data(symbol, data)
+            
             self.logger.info(f"✅ {symbol} 数据处理完成")
             return True
             
@@ -54,44 +70,69 @@ class StockDataManager:
     
     def batch_download_and_store(self, symbols: List[str], start_date: str = None, incremental: bool = True, use_retry: bool = True) -> Dict:
         """批量下载并存储股票数据"""
-        results = {
-            'total': len(symbols),
-            'successful': 0,
-            'failed': 0,
-            'skipped': 0,
-            'details': {}
-        }
-        
-        mode_text = "增量更新" if incremental else "全量下载"
-        retry_text = "（启用重试）" if use_retry else ""
-        self.logger.info(f"🎯 开始批量处理 {len(symbols)} 个股票 ({mode_text}){retry_text}")
-        print(f"\n📊 批量{mode_text}股票数据{retry_text}")
-        print(f"📅 数据时间范围: {start_date or '2020-01-01'} 至今")
-        print(f"📈 股票数量: {len(symbols)}")
-        print("=" * 60)
-        
-        for i, symbol in enumerate(symbols):
-            print(f"\n[{i+1}/{len(symbols)}] 处理 {symbol}...")
+        if self.use_hybrid:
+            # 使用混合下载器的批量方法
+            self.logger.info(f"🔄 使用混合策略批量下载 {len(symbols)} 个股票")
+            print(f"\n🔄 混合策略批量下载股票数据")
+            print(f"📅 数据时间范围: {start_date or '2000-01-01'} 至今")
+            print(f"📈 股票数量: {len(symbols)}")
+            print("💡 策略: 新股票用Stooq批量下载 + 已有股票用yfinance增量更新")
             
-            success = self.download_and_store_stock(symbol, start_date, incremental, use_retry)
+            # 直接使用混合下载器的批量方法
+            batch_results = self.downloader.batch_download(symbols, start_date or "2000-01-01")
             
-            if success:
-                results['successful'] += 1
-                results['details'][symbol] = 'success'
-                print(f"✅ {symbol} 完成")
-            else:
-                results['failed'] += 1 
-                results['details'][symbol] = 'failed'
-                print(f"❌ {symbol} 失败")
+            # 转换结果格式以保持兼容性
+            results = {
+                'total': len(symbols),
+                'successful': len([r for r in batch_results.values() if 'error' not in r]),
+                'failed': len([r for r in batch_results.values() if 'error' in r]),
+                'skipped': 0,
+                'details': {symbol: 'success' if 'error' not in result else 'failed' 
+                          for symbol, result in batch_results.items()}
+            }
+            
+            return results
         
-        # 显示最终结果
-        print("\n" + "=" * 60)
-        print(f"📊 批量{mode_text}结果:")
-        print(f"✅ 成功: {results['successful']}")
-        print(f"❌ 失败: {results['failed']}")
-        print(f"📊 成功率: {results['successful']/results['total']*100:.1f}%")
-        
-        return results
+        else:
+            # 传统批量下载方式
+            results = {
+                'total': len(symbols),
+                'successful': 0,
+                'failed': 0,
+                'skipped': 0,
+                'details': {}
+            }
+            
+            mode_text = "增量更新" if incremental else "全量下载"
+            retry_text = "（启用重试）" if use_retry else ""
+            self.logger.info(f"🎯 开始批量处理 {len(symbols)} 个股票 ({mode_text}){retry_text}")
+            print(f"\n📊 批量{mode_text}股票数据{retry_text}")
+            print(f"📅 数据时间范围: {start_date or '2020-01-01'} 至今")
+            print(f"📈 股票数量: {len(symbols)}")
+            print("=" * 60)
+            
+            for i, symbol in enumerate(symbols):
+                print(f"\n[{i+1}/{len(symbols)}] 处理 {symbol}...")
+                
+                success = self.download_and_store_stock(symbol, start_date, incremental, use_retry)
+                
+                if success:
+                    results['successful'] += 1
+                    results['details'][symbol] = 'success'
+                    print(f"✅ {symbol} 完成")
+                else:
+                    results['failed'] += 1 
+                    results['details'][symbol] = 'failed'
+                    print(f"❌ {symbol} 失败")
+            
+            # 显示最终结果
+            print("\n" + "=" * 60)
+            print(f"📊 批量{mode_text}结果:")
+            print(f"✅ 成功: {results['successful']}")
+            print(f"❌ 失败: {results['failed']}")
+            print(f"📊 成功率: {results['successful']/results['total']*100:.1f}%")
+            
+            return results
     
     def update_stock_data(self, symbol: str, incremental: bool = True, use_retry: bool = True) -> bool:
         """更新单个股票的数据（默认增量更新）"""
@@ -246,6 +287,7 @@ def main():
     parser.add_argument('--incremental', action='store_true', default=True, help='使用增量下载（默认）')
     parser.add_argument('--no-retry', action='store_true', help='禁用重试机制')
     parser.add_argument('--max-retries', type=int, default=3, help='最大重试次数（默认3次）')
+    parser.add_argument('--no-hybrid', action='store_true', help='禁用混合下载策略，仅使用yfinance')
     parser.add_argument('--retry-delay', type=int, default=30, help='重试基础延迟时间（秒，默认30）')
     
     args = parser.parse_args()
@@ -262,15 +304,21 @@ def main():
     print("=" * 50)
     
     # 创建数据管理器
+    use_hybrid_mode = not args.no_hybrid  # 默认使用混合下载策略
     manager = StockDataManager(
         db_path=args.db_path,
         max_retries=args.max_retries,
-        base_delay=args.retry_delay
+        base_delay=args.retry_delay,
+        use_hybrid=use_hybrid_mode
     )
     
     # 确定下载模式和重试设置
     incremental_mode = not args.full_download  # 如果指定了 --full-download，则不使用增量模式
     use_retry = not args.no_retry  # 如果指定了 --no-retry，则不使用重试
+    
+    # 显示下载策略
+    strategy_text = "混合策略（Stooq批量+yfinance增量）" if use_hybrid_mode else "yfinance策略"
+    print(f"🔄 下载策略: {strategy_text}")
     
     try:
         if args.action == 'download':
