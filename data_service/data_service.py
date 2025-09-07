@@ -6,14 +6,15 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union, Type
-from Stock.data_service.database import StockDatabase
-from Stock.data_service.yfinance_downloader import YFinanceDataDownloader
-from Stock.data_service.stooq_downloader import StooqDataDownloader
-from Stock.data_service.models import (
+from typing import Dict, List, Optional, Union
+from .database import StockDatabase
+from .downloaders.yfinance import YFinanceDataDownloader
+from .downloaders.stooq import StooqDataDownloader
+from .models import (
     StockData, FinancialData, ComprehensiveData, DataQuality,
     PriceData, SummaryStats, BasicInfo
 )
+from .quality import assess_data_quality
 
 
 class DataService:
@@ -49,16 +50,11 @@ class DataService:
             最后更新日期，如果没有记录则返回None
         """
         try:
-            # 查询数据库中该股票的最新日期
-            query = "SELECT MAX(date) FROM stock_prices WHERE symbol = ?"
-            result = self.database.cursor.execute(query, (symbol,)).fetchone()
-            
-            if result and result[0]:
-                last_date = datetime.strptime(result[0], '%Y-%m-%d')
-                # 从最后一天的下一天开始下载，避免重复
-                next_date = last_date + timedelta(days=1)
+            last_date = self.database.get_last_update_date(symbol)
+            if last_date:
+                last_dt = datetime.strptime(last_date, '%Y-%m-%d')
+                next_date = last_dt + timedelta(days=1)
                 return next_date.strftime('%Y-%m-%d')
-            
             return None
         except Exception as e:
             self.logger.warning(f"获取 {symbol} 最后更新日期失败: {str(e)}")
@@ -130,7 +126,7 @@ class DataService:
     
     def download_and_store_stock_data(self, symbol: str, start_date: str = None,
                                     incremental: bool = True, use_retry: bool = True,
-                                    downloader_type: str = "yfinance") -> Dict[str, any]:
+                                    downloader_type: str = "yfinance") -> Dict[str, Any]:
         """
         下载并存储股票数据
         
@@ -211,7 +207,7 @@ class DataService:
     
     def download_and_store_comprehensive_data(self, symbol: str, start_date: str = None,
                                             incremental: bool = True, use_retry: bool = True,
-                                            downloader_type: str = "yfinance") -> Dict[str, any]:
+                                            downloader_type: str = "yfinance") -> Dict[str, Any]:
         """
         下载并存储综合数据（价格+财务）
         
@@ -238,7 +234,12 @@ class DataService:
             financial_data = self.download_financial_data(symbol, use_retry)
             
             # 评估数据质量
-            data_quality = self._assess_data_quality(stock_data, financial_data)
+            # 使用集中化的质量评估逻辑
+            data_quality = assess_data_quality(
+                stock_data,
+                financial_data,
+                start_date or "2020-01-01"
+            )
             
             # 创建综合数据对象
             stock_data_obj = stock_data if isinstance(stock_data, StockData) else None
@@ -350,90 +351,7 @@ class DataService:
             'results': results
         }
     
-    def _assess_data_quality(self, stock_data: Union[StockData, Dict], 
-                           financial_data: Union[FinancialData, Dict]) -> DataQuality:
-        """
-        评估数据质量
-        
-        Args:
-            stock_data: 股票数据
-            financial_data: 财务数据
-            
-        Returns:
-            数据质量评估结果
-        """
-        # 检查数据可用性
-        stock_available = False
-        financial_available = False
-        issues = []
-        
-        if isinstance(stock_data, StockData):
-            stock_available = True
-        elif isinstance(stock_data, dict):
-            stock_available = 'error' not in stock_data
-        
-        if isinstance(financial_data, FinancialData):
-            financial_available = True
-        elif isinstance(financial_data, dict):
-            financial_available = 'error' not in financial_data
-        
-        # 评估股票数据质量
-        stock_data_completeness = None
-        if stock_available:
-            if isinstance(stock_data, StockData):
-                data_points = stock_data.data_points
-            else:
-                data_points = stock_data.get('data_points', 0)
-            start_date = "2020-01-01"  # 默认开始日期
-            expected_points = (datetime.now() - datetime.strptime(start_date, '%Y-%m-%d')).days
-            stock_data_completeness = min(1.0, data_points / (expected_points * 0.7))  # 考虑周末
-        else:
-            issues.append('股票价格数据不可用')
-        
-        # 评估财务数据质量
-        financial_statements_count = 0
-        if financial_available:
-            if isinstance(financial_data, FinancialData):
-                statements = financial_data.financial_statements
-            else:
-                statements = financial_data.get('financial_statements', {})
-            financial_statements_count = len(statements)
-            if len(statements) < 3:
-                issues.append('财务报表数据不完整')
-        else:
-            issues.append('财务数据不可用')
-        
-        # 总体完整性评分
-        completeness_score = 0
-        if stock_available:
-            completeness_score += 0.6
-        if financial_available:
-            completeness_score += 0.4
-        
-        quality_grade = self._get_quality_grade(completeness_score)
-        
-        return DataQuality(
-            stock_data_available=stock_available,
-            financial_data_available=financial_available,
-            data_completeness=completeness_score,
-            quality_grade=quality_grade,
-            issues=issues,
-            stock_data_completeness=stock_data_completeness,
-            financial_statements_count=financial_statements_count
-        )
-    
-    def _get_quality_grade(self, score: float) -> str:
-        """根据完整性评分获取质量等级"""
-        if score >= 0.9:
-            return 'A - 优秀'
-        elif score >= 0.7:
-            return 'B - 良好'
-        elif score >= 0.5:
-            return 'C - 一般'
-        elif score >= 0.3:
-            return 'D - 较差'
-        else:
-            return 'F - 很差'
+    # 质量评估逻辑已集中到 quality.assess_data_quality，无需本地额外包装
     
     def get_existing_symbols(self) -> List[str]:
         """获取数据库中已存在的股票代码列表"""

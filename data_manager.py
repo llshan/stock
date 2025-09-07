@@ -8,15 +8,16 @@ import os
 import sys
 import argparse
 import logging
+from logging_utils import setup_logging
 from datetime import datetime
 from typing import List, Dict
 
 # 添加当前目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from data_service.yfinance_downloader import YFinanceDataDownloader, create_watchlist
-from analyzer.database import StockDatabase
-from analyzer.hybrid_downloader import HybridStockDownloader
+from data_service.downloaders.yfinance import YFinanceDataDownloader, create_watchlist
+from data_service import StockDatabase
+from data_service import DataManager
 
 class StockDataManager:
     def __init__(self, db_path: str = "stock_data.db", max_retries: int = 3, base_delay: int = 30, use_hybrid: bool = True):
@@ -25,13 +26,12 @@ class StockDataManager:
         self.use_hybrid = use_hybrid
         
         if use_hybrid:
-            # 使用混合下载器（推荐）
-            self.downloader = HybridStockDownloader(self.database, max_retries, base_delay)
+            # 使用数据管理器（推荐）
+            self.downloader = DataManager(self.database, max_retries, base_delay)
         else:
-            # 使用传统yfinance下载器
+            # 使用传统 yfinance 下载器（仅下载，不负责存库）
             self.downloader = YFinanceDataDownloader(
-                database=self.database, 
-                max_retries=max_retries, 
+                max_retries=max_retries,
                 base_delay=base_delay
             )
         self.logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ class StockDataManager:
                 data = self.downloader.download_comprehensive_data(symbol, start_date, incremental, use_retry)
             
             # 检查下载是否成功
-            if 'error' in data:
+            if isinstance(data, dict) and 'error' in data:
                 self.logger.error(f"❌ {symbol} 下载失败: {data['error']}")
                 return False
             
@@ -73,15 +73,15 @@ class StockDataManager:
         if self.use_hybrid:
             # 使用混合下载器的批量方法
             self.logger.info(f"🔄 使用混合策略批量下载 {len(symbols)} 个股票")
-            print(f"\n🔄 混合策略批量下载股票数据")
-            print(f"📅 数据时间范围: {start_date or '2000-01-01'} 至今")
-            print(f"📈 股票数量: {len(symbols)}")
-            print("💡 策略: 新股票用Stooq批量下载 + 已有股票用yfinance增量更新")
+            self.logger.info("🔄 混合策略批量下载股票数据")
+            self.logger.info(f"📅 数据时间范围: {start_date or '2000-01-01'} 至今")
+            self.logger.info(f"📈 股票数量: {len(symbols)}")
+            self.logger.info("💡 策略: 新股票用Stooq批量下载 + 已有股票用yfinance增量更新")
             
             # 直接使用混合下载器的批量方法
             batch_results = self.downloader.batch_download(symbols, start_date or "2000-01-01")
             
-            # 转换结果格式以保持兼容性
+            # 转换结果格式以保持结构一致
             results = {
                 'total': len(symbols),
                 'successful': len([r for r in batch_results.values() if 'error' not in r]),
@@ -106,31 +106,31 @@ class StockDataManager:
             mode_text = "增量更新" if incremental else "全量下载"
             retry_text = "（启用重试）" if use_retry else ""
             self.logger.info(f"🎯 开始批量处理 {len(symbols)} 个股票 ({mode_text}){retry_text}")
-            print(f"\n📊 批量{mode_text}股票数据{retry_text}")
-            print(f"📅 数据时间范围: {start_date or '2020-01-01'} 至今")
-            print(f"📈 股票数量: {len(symbols)}")
-            print("=" * 60)
+            self.logger.info(f"📊 批量{mode_text}股票数据{retry_text}")
+            self.logger.info(f"📅 数据时间范围: {start_date or '2020-01-01'} 至今")
+            self.logger.info(f"📈 股票数量: {len(symbols)}")
+            self.logger.info("=" * 60)
             
             for i, symbol in enumerate(symbols):
-                print(f"\n[{i+1}/{len(symbols)}] 处理 {symbol}...")
+                self.logger.info(f"[{i+1}/{len(symbols)}] 处理 {symbol}…")
                 
                 success = self.download_and_store_stock(symbol, start_date, incremental, use_retry)
                 
                 if success:
                     results['successful'] += 1
                     results['details'][symbol] = 'success'
-                    print(f"✅ {symbol} 完成")
+                    self.logger.info(f"✅ {symbol} 完成")
                 else:
                     results['failed'] += 1 
                     results['details'][symbol] = 'failed'
-                    print(f"❌ {symbol} 失败")
+                    self.logger.warning(f"❌ {symbol} 失败")
             
             # 显示最终结果
-            print("\n" + "=" * 60)
-            print(f"📊 批量{mode_text}结果:")
-            print(f"✅ 成功: {results['successful']}")
-            print(f"❌ 失败: {results['failed']}")
-            print(f"📊 成功率: {results['successful']/results['total']*100:.1f}%")
+            self.logger.info("=" * 60)
+            self.logger.info(f"📊 批量{mode_text}结果:")
+            self.logger.info(f"✅ 成功: {results['successful']}")
+            self.logger.info(f"❌ 失败: {results['failed']}")
+            self.logger.info(f"📊 成功率: {results['successful']/results['total']*100:.1f}%")
             
             return results
     
@@ -170,21 +170,21 @@ class StockDataManager:
         info = self.get_existing_stocks_info()
         
         if 'error' in info:
-            print(f"❌ 获取股票信息失败: {info['error']}")
+            self.logger.warning(f"❌ 获取股票信息失败: {info['error']}")
             return
         
-        print("\n" + "=" * 60)
-        print("📊 数据库中已有股票信息")
-        print("=" * 60)
-        print(f"📈 总股票数量: {info['total_stocks']}")
+        self.logger.info("=" * 60)
+        self.logger.info("📊 数据库中已有股票信息")
+        self.logger.info("=" * 60)
+        self.logger.info(f"📈 总股票数量: {info['total_stocks']}")
         
         if info['symbols']:
-            print("\n📋 股票列表及最后更新日期:")
+            self.logger.info("📋 股票列表及最后更新日期:")
             for symbol in sorted(info['symbols']):
                 last_update = info['last_updates'].get(symbol, '未知')
-                print(f"   {symbol}: {last_update}")
+                self.logger.info(f"   {symbol}: {last_update}")
         else:
-            print("\n📭 数据库中暂无股票数据")
+            self.logger.info("📭 数据库中暂无股票数据")
     
     def generate_data_report(self) -> Dict:
         """生成数据质量报告"""
@@ -234,39 +234,39 @@ class StockDataManager:
         report = self.generate_data_report()
         
         if 'error' in report:
-            print(f"❌ 报告生成失败: {report['error']}")
+            self.logger.warning(f"❌ 报告生成失败: {report['error']}")
             return
         
-        print("\n" + "=" * 60)
-        print("📊 股票数据质量报告")
-        print("=" * 60)
-        print(f"📅 报告生成时间: {report['generation_time']}")
-        print(f"📈 总股票数量: {report['total_stocks']}")
-        print(f"📝 最近下载记录: {report['recent_downloads']}")
+        self.logger.info("=" * 60)
+        self.logger.info("📊 股票数据质量报告")
+        self.logger.info("=" * 60)
+        self.logger.info(f"📅 报告生成时间: {report['generation_time']}")
+        self.logger.info(f"📈 总股票数量: {report['total_stocks']}")
+        self.logger.info(f"📝 最近下载记录: {report['recent_downloads']}")
         
         if 'quality_distribution' in report and report['quality_distribution']:
-            print("\n🎯 数据质量等级分布:")
+            self.logger.info("🎯 数据质量等级分布:")
             for grade, count in report['quality_distribution'].items():
-                print(f"   {grade}: {count} 个股票")
+                self.logger.info(f"   {grade}: {count} 个股票")
         
         if 'data_completeness_stats' in report:
             stats = report['data_completeness_stats']
-            print(f"\n📊 数据完整性统计:")
-            print(f"   平均完整性: {stats.get('average', 0)*100:.1f}%")
-            print(f"   中位数完整性: {stats.get('median', 0)*100:.1f}%")
-            print(f"   最低完整性: {stats.get('min', 0)*100:.1f}%")
-            print(f"   最高完整性: {stats.get('max', 0)*100:.1f}%")
+            self.logger.info("📊 数据完整性统计:")
+            self.logger.info(f"   平均完整性: {stats.get('average', 0)*100:.1f}%")
+            self.logger.info(f"   中位数完整性: {stats.get('median', 0)*100:.1f}%")
+            self.logger.info(f"   最低完整性: {stats.get('min', 0)*100:.1f}%")
+            self.logger.info(f"   最高完整性: {stats.get('max', 0)*100:.1f}%")
         
         if 'availability_stats' in report:
             avail = report['availability_stats']
-            print(f"\n🔍 数据可用性:")
-            print(f"   股票价格数据: {avail.get('stock_data_available', 0)} 个股票")
-            print(f"   财务报表数据: {avail.get('financial_data_available', 0)} 个股票")
+            self.logger.info("🔍 数据可用性:")
+            self.logger.info(f"   股票价格数据: {avail.get('stock_data_available', 0)} 个股票")
+            self.logger.info(f"   财务报表数据: {avail.get('financial_data_available', 0)} 个股票")
     
     def backup_database(self, backup_path: str):
         """备份数据库"""
         self.database.backup_database(backup_path)
-        print(f"✅ 数据库已备份到: {backup_path}")
+        self.logger.info(f"✅ 数据库已备份到: {backup_path}")
     
     def close(self):
         """关闭数据库连接"""
@@ -293,15 +293,10 @@ def main():
     args = parser.parse_args()
     
     # 配置日志
-    level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
-    )
+    setup_logging('INFO' if args.verbose else 'WARNING')
     
-    print("🚀 股票数据管理器")
-    print("=" * 50)
+    logging.getLogger(__name__).info("🚀 股票数据管理器")
+    logging.getLogger(__name__).info("=" * 50)
     
     # 创建数据管理器
     use_hybrid_mode = not args.no_hybrid  # 默认使用混合下载策略
@@ -318,30 +313,30 @@ def main():
     
     # 显示下载策略
     strategy_text = "混合策略（Stooq批量+yfinance增量）" if use_hybrid_mode else "yfinance策略"
-    print(f"🔄 下载策略: {strategy_text}")
+    logging.getLogger(__name__).info(f"🔄 下载策略: {strategy_text}")
     
     try:
         if args.action == 'download':
             # 确定要处理的股票
             if args.use_watchlist:
                 symbols = create_watchlist()
-                print(f"📋 使用预设关注清单: {len(symbols)} 个股票")
+                logging.getLogger(__name__).info(f"📋 使用预设关注清单: {len(symbols)} 个股票")
             elif args.symbols:
                 symbols = [s.upper() for s in args.symbols]
-                print(f"📋 自定义股票清单: {len(symbols)} 个股票")
+                logging.getLogger(__name__).info(f"📋 自定义股票清单: {len(symbols)} 个股票")
             else:
-                print("❌ 请指定股票代码或使用 --use-watchlist 参数")
-                print("💡 示例用法:")
-                print("   python data_manager.py --use-watchlist")
-                print("   python data_manager.py --symbols AAPL GOOGL MSFT")
-                print("   python data_manager.py --use-watchlist --full-download  # 全量下载")
+                logging.getLogger(__name__).error("❌ 请指定股票代码或使用 --use-watchlist 参数")
+                logging.getLogger(__name__).info("💡 示例用法:")
+                logging.getLogger(__name__).info("   python data_manager.py --use-watchlist")
+                logging.getLogger(__name__).info("   python data_manager.py --symbols AAPL GOOGL MSFT")
+                logging.getLogger(__name__).info("   python data_manager.py --use-watchlist --full-download  # 全量下载")
                 return
             
             # 显示下载模式和重试设置
             mode_text = "增量下载" if incremental_mode else "全量下载"
             retry_text = f"重试机制（最大{args.max_retries}次，延迟{args.retry_delay}s）" if use_retry else "禁用重试"
-            print(f"🔄 下载模式: {mode_text}")
-            print(f"🔄 重试设置: {retry_text}")
+            logging.getLogger(__name__).info(f"🔄 下载模式: {mode_text}")
+            logging.getLogger(__name__).info(f"🔄 重试设置: {retry_text}")
             
             # 执行批量下载
             results = manager.batch_download_and_store(symbols, args.start_date, incremental_mode, use_retry)
@@ -351,10 +346,10 @@ def main():
             
         elif args.action == 'update':
             if not args.symbols:
-                print("❌ 更新操作需要指定股票代码")
-                print("💡 示例用法:")
-                print("   python data_manager.py --action update --symbols AAPL GOOGL")
-                print("   python data_manager.py --action update --symbols AAPL --full-download")
+                logging.getLogger(__name__).error("❌ 更新操作需要指定股票代码")
+                logging.getLogger(__name__).info("💡 示例用法:")
+                logging.getLogger(__name__).info("   python data_manager.py --action update --symbols AAPL GOOGL")
+                logging.getLogger(__name__).info("   python data_manager.py --action update --symbols AAPL --full-download")
                 return
             
             for symbol in args.symbols:
@@ -362,9 +357,9 @@ def main():
                 mode_text = "增量" if incremental_mode else "全量"
                 retry_text = "（重试）" if use_retry else ""
                 if success:
-                    print(f"✅ {symbol} {mode_text}更新成功{retry_text}")
+                    logging.getLogger(__name__).info(f"✅ {symbol} {mode_text}更新成功{retry_text}")
                 else:
-                    print(f"❌ {symbol} {mode_text}更新失败{retry_text}")
+                    logging.getLogger(__name__).warning(f"❌ {symbol} {mode_text}更新失败{retry_text}")
         
         elif args.action == 'info':
             # 显示数据库中已有股票信息

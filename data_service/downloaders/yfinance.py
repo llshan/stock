@@ -6,18 +6,17 @@
 
 import yfinance as yf
 import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Union
 import time
 import logging
-import json
-from .base_downloader import BaseDownloader
-from .models import (
+from .base import BaseDownloader
+from ..models import (
     StockData, FinancialData, ComprehensiveData, PriceData, SummaryStats, 
-    BasicInfo, FinancialStatement, DataQuality, DownloadError,
+    BasicInfo, FinancialStatement, DataQuality,
     create_empty_stock_data, create_empty_financial_data
 )
+from ..quality import assess_data_quality
 
 class YFinanceDataDownloader(BaseDownloader):
     def __init__(self, max_retries=3, base_delay=30):
@@ -256,8 +255,8 @@ class YFinanceDataDownloader(BaseDownloader):
         # 下载财务数据
         financial_data = self.download_financial_data(symbol, use_retry)
         
-        # 评估数据质量
-        data_quality = self._assess_data_quality(stock_data, financial_data)
+        # 评估数据质量（统一工具函数）
+        data_quality = assess_data_quality(stock_data, financial_data, self.start_date)
         
         # 创建综合数据对象
         stock_data_obj = None
@@ -320,79 +319,7 @@ class YFinanceDataDownloader(BaseDownloader):
         self.logger.info(f"✅ 批量下载完成，成功: {len([r for r in results.values() if 'error' not in r])}/{total}")
         return results
     
-    def _assess_data_quality(self, stock_data: Union[StockData, Dict], financial_data: Union[FinancialData, Dict]) -> DataQuality:
-        """评估数据质量"""
-        # 检查数据可用性
-        stock_available = False
-        financial_available = False
-        issues = []
-        
-        if isinstance(stock_data, StockData):
-            stock_available = True
-        elif isinstance(stock_data, dict):
-            stock_available = 'error' not in stock_data
-        
-        if isinstance(financial_data, FinancialData):
-            financial_available = True
-        elif isinstance(financial_data, dict):
-            financial_available = 'error' not in financial_data
-        
-        # 评估股票数据质量
-        stock_data_completeness = None
-        if stock_available:
-            if isinstance(stock_data, StockData):
-                data_points = stock_data.data_points
-            else:
-                data_points = stock_data.get('data_points', 0)
-            expected_points = (datetime.now() - datetime.strptime(self.start_date, '%Y-%m-%d')).days
-            stock_data_completeness = min(1.0, data_points / (expected_points * 0.7))  # 考虑周末
-        else:
-            issues.append('股票价格数据不可用')
-        
-        # 评估财务数据质量
-        financial_statements_count = 0
-        if financial_available:
-            if isinstance(financial_data, FinancialData):
-                statements = financial_data.financial_statements
-            else:
-                statements = financial_data.get('financial_statements', {})
-            financial_statements_count = len(statements)
-            if len(statements) < 3:
-                issues.append('财务报表数据不完整')
-        else:
-            issues.append('财务数据不可用')
-        
-        # 总体完整性评分
-        completeness_score = 0
-        if stock_available:
-            completeness_score += 0.6
-        if financial_available:
-            completeness_score += 0.4
-        
-        quality_grade = self._get_quality_grade(completeness_score)
-        
-        return DataQuality(
-            stock_data_available=stock_available,
-            financial_data_available=financial_available,
-            data_completeness=completeness_score,
-            quality_grade=quality_grade,
-            issues=issues,
-            stock_data_completeness=stock_data_completeness,
-            financial_statements_count=financial_statements_count
-        )
-    
-    def _get_quality_grade(self, score: float) -> str:
-        """根据完整性评分获取质量等级"""
-        if score >= 0.9:
-            return 'A - 优秀'
-        elif score >= 0.7:
-            return 'B - 良好'
-        elif score >= 0.5:
-            return 'C - 一般'
-        elif score >= 0.3:
-            return 'D - 较差'
-        else:
-            return 'F - 很差'
+    # 质量评估与评级逻辑统一在 quality.py 中
 
 def create_watchlist() -> List[str]:
     """创建需要关注的股票清单"""
@@ -404,12 +331,13 @@ def create_watchlist() -> List[str]:
 
 if __name__ == "__main__":
     # 配置日志
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    from logging_utils import setup_logging
+    setup_logging()
     
-    print("🚀 股票数据下载器（使用DataService）")
-    print("=" * 50)
-    print("⚠️  注意: 这个示例展示下载器功能，但不包含数据库存储")
-    print("💡 要使用完整功能（包括数据库），请使用 DataService 类")
+    logging.getLogger(__name__).info("🚀 股票数据下载器（使用DataService）")
+    logging.getLogger(__name__).info("=" * 50)
+    logging.getLogger(__name__).info("⚠️  注意: 这个示例展示下载器功能，但不包含数据库存储")
+    logging.getLogger(__name__).info("💡 要使用完整功能（包括数据库），请使用 DataService 类")
     
     # 创建下载器
     downloader = YFinanceDataDownloader()
@@ -417,12 +345,12 @@ if __name__ == "__main__":
     # 获取关注股票列表
     watchlist = create_watchlist()
     
-    print(f"\n📊 将下载 {len(watchlist)} 个股票的数据:")
+    logging.getLogger(__name__).info(f"📊 将下载 {len(watchlist)} 个股票的数据:")
     for i, symbol in enumerate(watchlist, 1):
-        print(f"  {i:2d}. {symbol}")
+        logging.getLogger(__name__).info(f"  {i:2d}. {symbol}")
     
-    print(f"\n⏰ 数据时间范围: {downloader.start_date} 至今")
-    print("📈 包含: 股票价格数据 + 财务报表数据")
+    logging.getLogger(__name__).info(f"⏰ 数据时间范围: {downloader.start_date} 至今")
+    logging.getLogger(__name__).info("📈 包含: 股票价格数据 + 财务报表数据")
     
     # 执行批量下载（仅下载，不存储）
     results = downloader.batch_download(watchlist)
@@ -431,29 +359,35 @@ if __name__ == "__main__":
     successful = len([r for r in results.values() if not isinstance(r, dict) or 'error' not in r])
     failed = len(results) - successful
     
-    print("\n" + "=" * 50)
-    print("📊 下载结果摘要:")
-    print(f"✅ 成功: {successful} 个股票")
-    print(f"❌ 失败: {failed} 个股票")
+    logging.getLogger(__name__).info("=" * 50)
+    logging.getLogger(__name__).info("📊 下载结果摘要:")
+    logging.getLogger(__name__).info(f"✅ 成功: {successful} 个股票")
+    logging.getLogger(__name__).info(f"❌ 失败: {failed} 个股票")
     
     if failed > 0:
-        print("\n❌ 失败的股票:")
+        logging.getLogger(__name__).info("❌ 失败的股票:")
         for symbol, data in results.items():
             if isinstance(data, dict) and 'error' in data:
-                print(f"   • {symbol}: {data['error']}")
+                logging.getLogger(__name__).info(f"   • {symbol}: {data['error']}")
     
     # 数据质量报告
-    print("\n📈 下载的数据统计:")
+    logging.getLogger(__name__).info("📈 下载的数据统计:")
     for symbol, data in results.items():
         if hasattr(data, 'data_quality'):
-            print(f"   {symbol}: {data.data_quality.quality_grade}")
+            logging.getLogger(__name__).info(f"   {symbol}: {data.data_quality.quality_grade}")
         elif isinstance(data, ComprehensiveData):
-            print(f"   {symbol}: {data.data_quality.quality_grade}")
+            logging.getLogger(__name__).info(f"   {symbol}: {data.data_quality.quality_grade}")
         elif not isinstance(data, dict) or 'error' not in data:
-            print(f"   {symbol}: 数据下载完成")
+            logging.getLogger(__name__).info(f"   {symbol}: 数据下载完成")
     
-    print(f"\n💡 要使用完整的数据管理功能（包括数据库存储），请参考:")
-    print("   from data_service.services import DataService")
-    print("   from data_service.database import StockDatabase")
-    print("   data_service = DataService(StockDatabase('stocks.db'))")
-    print("   data_service.batch_download_and_store(symbols)")
+    logging.getLogger(__name__).info("💡 要使用完整的数据管理功能（包括数据库存储），请参考:")
+    logging.getLogger(__name__).info("   from data_service import DataService, StockDatabase")
+    logging.getLogger(__name__).info("   data_service = DataService(StockDatabase('stocks.db'))")
+    logging.getLogger(__name__).info("   data_service.batch_download_and_store(symbols)")
+
+
+def main():
+    """主函数，用于 python -m Stock.data_service.downloaders.yfinance 调用"""
+    if __name__ == "__main__":
+        # 运行主程序代码
+        pass

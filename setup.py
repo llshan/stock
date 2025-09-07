@@ -19,10 +19,7 @@ def read_readme():
 # 读取requirements
 def read_requirements():
     """读取requirements.txt文件"""
-    requirements_path = os.path.join(os.path.dirname(__file__), 'requirements.txt')
-    if os.path.exists(requirements_path):
-        with open(requirements_path, 'r', encoding='utf-8') as f:
-            return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    # 使用简化版本的requirements
     return [
         'yfinance>=0.2.0',
         'pandas>=1.5.0',
@@ -45,8 +42,9 @@ setup(
     author_email="your-email@example.com",
     url="https://github.com/your-username/stock-analysis",
     
-    # 包配置
-    packages=find_packages(),
+    # 包配置 - 当前目录就是包，所以使用'.'作为包名
+    packages=['.', 'data_service', 'data_service.services', 'analyzer', 'cloud'],
+    package_dir={'': '.'},
     include_package_data=True,
     
     # Python版本要求
@@ -73,8 +71,8 @@ setup(
     # 命令行工具
     entry_points={
         'console_scripts': [
-            'stock-download=Stock.data_service.yfinance_downloader:main',
-            'stock-hybrid=Stock.data_service.hybrid_downloader:main',
+            'stock-download=Stock.data_service.downloaders.yfinance:main',
+            'stock-hybrid=Stock.data_service.downloaders.hybrid:main',
             'stock-analyze=Stock.analyzer.comprehensive_analyzer:main',
         ],
     },

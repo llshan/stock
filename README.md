@@ -43,167 +43,128 @@
 4. **批量管理**：支持多股票批量下载和更新
 5. **GCP云端部署**：支持Cloud SQL数据库
 
-## 安装依赖
+## 🚀 快速开始
+
+### 方法1：开发模式安装（推荐）
 
 ```bash
+# 克隆项目
+git clone <repository-url>
+cd Stock
+
+# 开发模式安装（可编辑安装）
+pip install -e .
+
+# 或者安装依赖
 pip install -r requirements.txt
+```
+
+### 方法2：正式安装
+
+```bash
+# 构建并安装
+pip install .
+
+# 或从PyPI安装（如果已发布）
+pip install stock-analysis
 ```
 
 ## 🎮 使用方法
 
 ### 🔥 推荐：综合分析系统
 
-**基本使用:**
+**使用python -m模块运行:**
 ```bash
-python analyzer/comprehensive_analyzer.py
+# 综合分析（示例）
+python -m Stock.analyzer.comprehensive_analyzer
+
+# 数据下载
+python -m Stock.data_service.downloaders.yfinance
+
+# 数据管理器（原混合下载器）
+python -m Stock.data_service.downloaders.hybrid
 ```
 
-**自定义分析:**
+**使用命令行工具:**
+```bash
+# 如果已安装包，可以直接使用命令行工具
+stock-analyze        # 综合分析
+stock-download       # yfinance下载器
+stock-hybrid         # 数据管理器（原混合下载器）
+```
+
+**编程方式使用:**
 ```python
-from analyzer import ComprehensiveStockAnalyzer
+from Stock.analyzer import ComprehensiveStockAnalyzer
 
 analyzer = ComprehensiveStockAnalyzer()
 symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
 results = analyzer.run_comprehensive_analysis(symbols, period="1y")
 ```
 
-### 📊 单独技术分析
+### 📊 数据下载和管理
 
-```bash
-python analyzer/stock_analyzer.py
-```
-
-### 💼 单独财务分析
-
+**使用包模块:**
 ```python
-from analyzer import FinancialAnalyzer, FinancialDataFetcher
+from Stock.data_service import DataService, StockDatabase, YFinanceDataDownloader
 
-fetcher = FinancialDataFetcher()
-analyzer = FinancialAnalyzer(fetcher)
+# 创建服务
+database = StockDatabase("stocks.db")
+downloader = YFinanceDataDownloader()
+service = DataService(database, downloader)
 
-# 财务比率分析
-ratios = analyzer.calculate_financial_ratios("AAPL")
-print(f"净利润率: {ratios['ratios']['net_profit_margin']:.2f}%")
-
-# 财务健康评估
-health = analyzer.analyze_financial_health("AAPL")
-print(f"财务健康等级: {health['grade']}")
+# 下载数据
+result = service.download_and_store_stock_data("AAPL")
 ```
 
-### ⚠️ 价格下跌监控
-
-价格下跌监控功能已集成在技术分析和综合分析中：
-
+### 💼 按需启用算子
 ```python
-from analyzer import StockAnalyzer, StockDataFetcher
-
-# 创建分析器
-fetcher = StockDataFetcher()
-analyzer = StockAnalyzer(fetcher)
-
-# 单个股票下跌检测
-result = analyzer.check_price_drop('AAPL', days=1, threshold_percent=15.0)
-if result['is_drop_alert']:
-    print(f"警告: {result['alert_message']}")
-
-# 批量股票下跌检测
-symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = analyzer.batch_check_price_drops(symbols, days=1, threshold_percent=15.0)
-print(f"发现 {results['summary']['alerts_count']} 只股票触发警告")
+from analyzer import run_analysis_for_symbols
+results = run_analysis_for_symbols(
+    ["AAPL"], db_path='stock_data.db',
+    enabled_operators=['ma','rsi','drop_alert','drop_alert_7d','fin_ratios','fin_health']
+)
+print(results['AAPL']['operators']['fin_ratios'])
 ```
 
-### 💾 历史数据管理
+### 💾 数据管理的新方式
 
-**下载完整历史数据:**
+**使用混合下载器（推荐）:**
 ```bash
-# 下载预设观察清单的所有数据（从2020年开始）
-python data_manager.py --use-watchlist --action download
+# 使用python -m运行混合下载器
+python -m Stock.data_service.downloaders.hybrid
 
-# 下载特定股票的数据
-python data_manager.py --symbols AAPL GOOGL MSFT --action download
-
-# 更新已有股票的数据
-python data_manager.py --symbols AAPL --action update
-```
-
-**数据质量报告:**
-```bash
-# 生成数据质量报告
-python data_manager.py --action report
-
-# 备份数据库
-python data_manager.py --action backup --backup-path backup.db
+# 或使用命令行工具
+stock-hybrid
 ```
 
 **编程方式使用:**
 ```python
-from data_service.yfinance_downloader import YFinanceDataDownloader
-from data_service.database import StockDatabase
+from Stock.data_service import DataManager, StockDatabase
 
-# 创建下载器和数据库
-downloader = YFinanceDataDownloader()
-database = StockDatabase("my_stock_data.db")
+# 创建数据管理器
+database = StockDatabase("stocks.db")
+manager = DataManager(database)
 
-# 下载并存储数据
+# 智能批量下载（自动选择最佳数据源）
 symbols = ['AAPL', 'GOOGL', 'MSFT']
-for symbol in symbols:
-    data = downloader.download_comprehensive_data(symbol, start_date="2020-01-01")
-    if 'error' not in data:
-        database.store_comprehensive_data(symbol, data)
-
-# 查询历史数据
-price_data = database.get_stock_prices('AAPL', '2023-01-01', '2023-12-31')
-financial_data = database.get_financial_data('AAPL', 'income_statement')
+results = manager.batch_download(symbols)
 ```
+
+（已移除旧版：不再提供 yfinance 直连与图表生成功能）
 
 ### 🎯 高级自定义
 
 ```python
 from analyzer import ComprehensiveStockAnalyzer
-
-# 创建分析器
-analyzer = ComprehensiveStockAnalyzer()
-
-# 自定义股票列表和分析周期
-symbols = ["AAPL", "AMZN", "NFLX", "META", "NVDA"]
-results = analyzer.run_comprehensive_analysis(symbols, period="2y")
-
-# 查看分析结果
+analyzer = ComprehensiveStockAnalyzer(db_path='stock_data.db', enabled_operators=['ma','rsi','drop_alert','fin_ratios','fin_health'])
+results = analyzer.run_comprehensive_analysis(["AAPL","NVDA"], period="6mo")
 for symbol, data in results.items():
-    report = data['comprehensive_report']
-    print(f"{symbol}: {report['overall_rating']} - {report['investment_recommendation']}")
-    
-    # 访问详细技术分析数据
-    tech = data['technical_analysis']
-    if 'error' not in tech:
-        print(f"  RSI: {tech['rsi']:.2f}, 趋势: {tech['trend']}")
-    
-    # 访问详细财务分析数据
-    fin = data['financial_analysis']
-    if 'error' not in fin:
-        ratios = fin['ratios']
-        print(f"  净利润率: {ratios.get('net_profit_margin', 0):.2f}%")
+    print(symbol, data['summary'])
 ```
 
-## 📁 输出文件
-
-程序会在 `results/` 文件夹中生成以下文件：
-
-### 🎯 综合分析输出
-**技术分析图表:**
-- `{股票代码}_candlestick.html`: 交互式K线图
-- `{股票代码}_rsi.png`: RSI指标图  
-- `{股票代码}_bollinger.html`: 布林带图表
-
-**财务分析图表:**
-- `{股票代码}_revenue_trend.html`: 营收趋势图
-- `{股票代码}_financial_metrics.png`: 财务指标分析图
-- `{股票代码}_health_dashboard.html`: 财务健康仪表盘
-
-### 📊 单独技术分析输出
-- `{股票代码}_candlestick.html`: K线图
-- `{股票代码}_rsi.png`: RSI指标图
-- `{股票代码}_bollinger.html`: 布林带图表
+## 📁 输出
+仅文本日志与结构化结果（dict/JSON）。无图表输出。
 
 ## 📖 指标说明
 
@@ -225,17 +186,29 @@ for symbol, data in results.items():
 - **D级 (20-39分)**: 不推荐 - 减持
 - **F级 (0-19分)**: 强烈不推荐 - 卖出
 
-## 📂 项目结构
+## 📂 项目结构（节选）
 
 ```
 Stock/
 ├── 📊 analyzer/                 # 核心分析模块包
 │   ├── __init__.py                     # 包初始化
-│   ├── stock_analyzer.py               # 📈 技术分析模块 (含价格下跌监控)
-│   ├── financial_analyzer.py           # 💼 财务分析模块
-│   ├── comprehensive_analyzer.py       # 🔥 综合分析系统
-│   ├── data_downloader.py              # 💾 历史数据下载器
-│   ├── database.py                     # 🗄️ 数据库存储模块
+│   ├── comprehensive_analyzer.py       # 🔥 综合分析系统（封装流水线调用）
+│   ├── app/
+│   │   └── runner.py                  # 流水线运行入口（构建算子/执行/汇总）
+│   ├── data/
+│   │   ├── repository.py              # 行情数据仓储（OHLCV）
+│   │   └── financial_repository.py    # 财务数据仓储（报表透视）
+│   ├── operators/                     # 可插拔算子
+│   │   ├── base.py                    # Operator 抽象
+│   │   ├── ma.py                      # 移动平均
+│   │   ├── rsi.py                     # RSI
+│   │   ├── drop_alert.py              # 1天跌幅预警
+│   │   ├── drop_alert_7d.py           # 7天跌幅预警
+│   │   ├── fin_ratios.py              # 财务比率
+│   │   └── fin_health.py              # 财务健康度
+│   ├── pipeline/
+│   │   ├── context.py                 # 分析上下文
+│   │   └── engine.py                  # 执行引擎
 │   └── README.md                       # 模块说明文档
 ├── 🌥️ cloud/                   # GCP 部署文件夹
 │   ├── deploy.sh                       # 🚀 自动部署脚本

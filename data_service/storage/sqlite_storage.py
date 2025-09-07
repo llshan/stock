@@ -1,0 +1,466 @@
+#!/usr/bin/env python3
+"""
+SQLite 存储实现
+基于原有 database.py 的 SQLite 实现重构
+"""
+
+import sqlite3
+import pandas as pd
+import json
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Union
+import logging
+
+from .base import BaseStorage, StorageError
+try:
+    from ..models import (
+        StockData, FinancialData, ComprehensiveData, PriceData, 
+        SummaryStats, BasicInfo, FinancialStatement, DataQuality
+    )
+except ImportError:
+    # Fallback for direct execution
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    from models import (
+        StockData, FinancialData, ComprehensiveData, PriceData, 
+        SummaryStats, BasicInfo, FinancialStatement, DataQuality
+    )
+
+
+class SQLiteStorage(BaseStorage):
+    """SQLite 存储实现"""
+    
+    def __init__(self, db_path: str = "stock_data.db"):
+        """
+        初始化 SQLite 存储
+        
+        Args:
+            db_path: 数据库文件路径
+        """
+        self.db_path = db_path
+        self.connection = None
+        self.cursor = None
+        self.logger = logging.getLogger(__name__)
+        self.connect()
+    
+    def connect(self):
+        """建立数据库连接"""
+        try:
+            self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
+            self.connection.execute("PRAGMA foreign_keys = ON")
+            self.cursor = self.connection.cursor()
+            self._create_tables()
+            self.logger.info(f"✅ SQLite 数据库连接成功: {self.db_path}")
+        except Exception as e:
+            raise StorageError(f"SQLite 连接失败: {e}", "connect")
+    
+    def close(self):
+        """关闭数据库连接"""
+        if self.connection:
+            self.connection.close()
+            self.logger.info("📴 SQLite 数据库连接已关闭")
+    
+    def _create_tables(self):
+        """创建数据库表结构"""
+        self.logger.info("📊 创建数据库表结构...")
+        
+        # 股票基本信息表
+        stocks_table = """
+        CREATE TABLE IF NOT EXISTS stocks (
+            symbol TEXT PRIMARY KEY,
+            company_name TEXT,
+            sector TEXT,
+            industry TEXT,
+            market_cap REAL,
+            employees INTEGER,
+            description TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        
+        # 股票价格数据表
+        stock_prices_table = """
+        CREATE TABLE IF NOT EXISTS stock_prices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            date TEXT,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume INTEGER,
+            adj_close REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (symbol) REFERENCES stocks (symbol),
+            UNIQUE(symbol, date)
+        )
+        """
+        
+        # 财务报表数据表
+        financial_statements_table = """
+        CREATE TABLE IF NOT EXISTS financial_statements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            statement_type TEXT,
+            period TEXT,
+            data TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (symbol) REFERENCES stocks (symbol),
+            UNIQUE(symbol, statement_type, period)
+        )
+        """
+        
+        # 下载日志表
+        download_logs_table = """
+        CREATE TABLE IF NOT EXISTS download_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            download_type TEXT,
+            status TEXT,
+            data_points INTEGER,
+            error_message TEXT,
+            download_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        
+        # 数据质量评估表
+        data_quality_table = """
+        CREATE TABLE IF NOT EXISTS data_quality (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            stock_data_available BOOLEAN,
+            financial_data_available BOOLEAN,
+            data_completeness REAL,
+            quality_grade TEXT,
+            issues TEXT,
+            assessment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        
+        tables = [
+            stocks_table,
+            stock_prices_table, 
+            financial_statements_table,
+            download_logs_table,
+            data_quality_table
+        ]
+        
+        for table in tables:
+            self.cursor.execute(table)
+        
+        # 创建索引提高查询性能
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol_date ON stock_prices (symbol, date)",
+            "CREATE INDEX IF NOT EXISTS idx_financial_symbol_type ON financial_statements (symbol, statement_type)",
+            "CREATE INDEX IF NOT EXISTS idx_download_logs_symbol ON download_logs (symbol)",
+        ]
+        
+        for index in indexes:
+            self.cursor.execute(index)
+        
+        self.connection.commit()
+        self.logger.info("✅ 数据库表结构创建完成")
+    
+    def store_stock_data(self, symbol: str, stock_data: Union[StockData, Dict]) -> bool:
+        """存储股票数据"""
+        try:
+            if isinstance(stock_data, StockData):
+                # 存储基本信息（如果有的话）
+                basic_info = getattr(stock_data, 'basic_info', None)
+                if basic_info:
+                    self._store_basic_info(symbol, basic_info)
+                
+                # 存储价格数据
+                self._store_price_data(symbol, stock_data.price_data)
+                
+            elif isinstance(stock_data, dict):
+                # 从字典存储
+                if 'basic_info' in stock_data:
+                    self._store_basic_info(symbol, stock_data['basic_info'])
+                
+                if 'price_data' in stock_data:
+                    price_data = PriceData.from_dict(stock_data['price_data'])
+                    self._store_price_data(symbol, price_data)
+            
+            # 记录下载日志
+            self._log_download(symbol, "stock", "success", 
+                             getattr(stock_data, 'data_points', 0) if hasattr(stock_data, 'data_points') 
+                             else stock_data.get('data_points', 0) if isinstance(stock_data, dict) else 0)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ 存储股票数据失败 {symbol}: {e}")
+            self._log_download(symbol, "stock", "failed", 0, str(e))
+            return False
+    
+    def store_financial_data(self, symbol: str, financial_data: Union[FinancialData, Dict]) -> bool:
+        """存储财务数据"""
+        try:
+            if isinstance(financial_data, FinancialData):
+                # 存储基本信息
+                self._store_basic_info(symbol, financial_data.basic_info)
+                
+                # 存储财务报表
+                for stmt_type, statement in financial_data.financial_statements.items():
+                    self._store_financial_statement(symbol, stmt_type, statement)
+                    
+            elif isinstance(financial_data, dict):
+                if 'basic_info' in financial_data:
+                    self._store_basic_info(symbol, financial_data['basic_info'])
+                
+                if 'financial_statements' in financial_data:
+                    for stmt_type, stmt_data in financial_data['financial_statements'].items():
+                        if 'error' not in stmt_data:
+                            statement = FinancialStatement.from_dict(stmt_data)
+                            self._store_financial_statement(symbol, stmt_type, statement)
+            
+            # 记录下载日志
+            stmt_count = len(getattr(financial_data, 'financial_statements', {})) if hasattr(financial_data, 'financial_statements') else len(financial_data.get('financial_statements', {}))
+            self._log_download(symbol, "financial", "success", stmt_count)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ 存储财务数据失败 {symbol}: {e}")
+            self._log_download(symbol, "financial", "failed", 0, str(e))
+            return False
+    
+    def store_data_quality(self, symbol: str, quality_data: Union[DataQuality, Dict]) -> bool:
+        """存储数据质量评估"""
+        try:
+            if isinstance(quality_data, DataQuality):
+                data = quality_data.to_dict()
+            else:
+                data = quality_data
+            
+            sql = """
+            INSERT OR REPLACE INTO data_quality 
+            (symbol, stock_data_available, financial_data_available, data_completeness, 
+             quality_grade, issues, assessment_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            self.cursor.execute(sql, (
+                symbol,
+                data['stock_data_available'],
+                data['financial_data_available'],
+                data['data_completeness'],
+                data['quality_grade'],
+                json.dumps(data.get('issues', [])),
+                datetime.now().isoformat()
+            ))
+            
+            self.connection.commit()
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ 存储数据质量评估失败 {symbol}: {e}")
+            return False
+    
+    def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[StockData]:
+        """获取股票数据"""
+        try:
+            # 构建查询条件
+            where_conditions = ["symbol = ?"]
+            params = [symbol]
+            
+            if start_date:
+                where_conditions.append("date >= ?")
+                params.append(start_date)
+            
+            if end_date:
+                where_conditions.append("date <= ?")
+                params.append(end_date)
+            
+            sql = f"""
+            SELECT date, open, high, low, close, volume, adj_close
+            FROM stock_prices 
+            WHERE {' AND '.join(where_conditions)}
+            ORDER BY date
+            """
+            
+            df = pd.read_sql_query(sql, self.connection, params=params)
+            
+            if df.empty:
+                return None
+            
+            # 构建价格数据
+            price_data = PriceData(
+                dates=df['date'].tolist(),
+                open=df['open'].tolist(),
+                high=df['high'].tolist(),
+                low=df['low'].tolist(),
+                close=df['close'].tolist(),
+                volume=df['volume'].tolist(),
+                adj_close=df['adj_close'].tolist()
+            )
+            
+            # 计算统计数据
+            from ..models import calculate_summary_stats
+            summary_stats = calculate_summary_stats(price_data.close, price_data.volume)
+            
+            return StockData(
+                symbol=symbol,
+                start_date=start_date or df['date'].min(),
+                end_date=end_date or df['date'].max(),
+                data_points=len(df),
+                price_data=price_data,
+                summary_stats=summary_stats,
+                downloaded_at=datetime.now().isoformat(),
+                data_source="database"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取股票数据失败 {symbol}: {e}")
+            return None
+    
+    def get_financial_data(self, symbol: str) -> Optional[FinancialData]:
+        """获取财务数据"""
+        try:
+            # 获取基本信息
+            basic_info_sql = "SELECT * FROM stocks WHERE symbol = ?"
+            basic_df = pd.read_sql_query(basic_info_sql, self.connection, params=[symbol])
+            
+            if basic_df.empty:
+                return None
+            
+            basic_info = BasicInfo(
+                company_name=basic_df.iloc[0]['company_name'] or "",
+                sector=basic_df.iloc[0]['sector'] or "",
+                industry=basic_df.iloc[0]['industry'] or "",
+                market_cap=basic_df.iloc[0]['market_cap'] or 0,
+                employees=basic_df.iloc[0]['employees'] or 0,
+                description=basic_df.iloc[0]['description'] or ""
+            )
+            
+            # 获取财务报表
+            financial_sql = "SELECT statement_type, period, data FROM financial_statements WHERE symbol = ?"
+            financial_df = pd.read_sql_query(financial_sql, self.connection, params=[symbol])
+            
+            statements = {}
+            for _, row in financial_df.iterrows():
+                stmt_data = json.loads(row['data'])
+                statements[row['statement_type']] = FinancialStatement.from_dict(stmt_data)
+            
+            return FinancialData(
+                symbol=symbol,
+                basic_info=basic_info,
+                financial_statements=statements,
+                downloaded_at=datetime.now().isoformat()
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取财务数据失败 {symbol}: {e}")
+            return None
+    
+    def get_existing_symbols(self) -> List[str]:
+        """获取已存储的股票代码列表"""
+        try:
+            sql = "SELECT DISTINCT symbol FROM stocks ORDER BY symbol"
+            result = self.cursor.execute(sql).fetchall()
+            return [row[0] for row in result]
+        except Exception as e:
+            self.logger.error(f"❌ 获取股票代码列表失败: {e}")
+            return []
+    
+    def get_last_update_date(self, symbol: str) -> Optional[str]:
+        """获取最后更新日期"""
+        try:
+            sql = "SELECT MAX(date) FROM stock_prices WHERE symbol = ?"
+            result = self.cursor.execute(sql, (symbol,)).fetchone()
+            return result[0] if result and result[0] else None
+        except Exception as e:
+            self.logger.error(f"❌ 获取最后更新日期失败 {symbol}: {e}")
+            return None
+    
+    def _store_basic_info(self, symbol: str, basic_info: Union[BasicInfo, Dict]):
+        """存储股票基本信息"""
+        if isinstance(basic_info, BasicInfo):
+            data = basic_info.to_dict()
+        else:
+            data = basic_info
+        
+        sql = """
+        INSERT OR REPLACE INTO stocks 
+        (symbol, company_name, sector, industry, market_cap, employees, description, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        
+        self.cursor.execute(sql, (
+            symbol,
+            data.get('company_name', ''),
+            data.get('sector', ''),
+            data.get('industry', ''),
+            data.get('market_cap', 0),
+            data.get('employees', 0),
+            data.get('description', ''),
+            datetime.now().isoformat()
+        ))
+        self.connection.commit()
+    
+    def _store_price_data(self, symbol: str, price_data: PriceData):
+        """存储价格数据"""
+        for i, date in enumerate(price_data.dates):
+            sql = """
+            INSERT OR REPLACE INTO stock_prices 
+            (symbol, date, open, high, low, close, volume, adj_close)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            self.cursor.execute(sql, (
+                symbol, date,
+                price_data.open[i],
+                price_data.high[i],
+                price_data.low[i],
+                price_data.close[i],
+                price_data.volume[i],
+                price_data.adj_close[i]
+            ))
+        
+        self.connection.commit()
+    
+    def _store_financial_statement(self, symbol: str, stmt_type: str, statement: FinancialStatement):
+        """存储财务报表"""
+        for period in statement.periods:
+            sql = """
+            INSERT OR REPLACE INTO financial_statements 
+            (symbol, statement_type, period, data)
+            VALUES (?, ?, ?, ?)
+            """
+            
+            # 获取该期间的数据
+            period_data = {}
+            for item_name, values in statement.items.items():
+                try:
+                    period_index = statement.periods.index(period)
+                    if period_index < len(values):
+                        period_data[item_name] = values[period_index]
+                except (ValueError, IndexError):
+                    period_data[item_name] = None
+            
+            stmt_data = {
+                'statement_type': stmt_type,
+                'periods': [period],
+                'items': {k: [v] for k, v in period_data.items()}
+            }
+            
+            self.cursor.execute(sql, (
+                symbol, stmt_type, period, json.dumps(stmt_data)
+            ))
+        
+        self.connection.commit()
+    
+    def _log_download(self, symbol: str, download_type: str, status: str, data_points: int = 0, error_message: str = None):
+        """记录下载日志"""
+        sql = """
+        INSERT INTO download_logs 
+        (symbol, download_type, status, data_points, error_message)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        
+        self.cursor.execute(sql, (
+            symbol, download_type, status, data_points, error_message
+        ))
+        self.connection.commit()

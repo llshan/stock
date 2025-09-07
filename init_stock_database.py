@@ -51,30 +51,31 @@ class StooqDatabaseInitializer:
             'data_source': 'Stooq'
         }
         
-        print(f"🌐 使用Stooq初始化股票数据库")
-        print(f"💾 数据库路径: {self.db_path}")
-        print(f"📅 数据时间范围: {start_date} 至今")
-        print(f"📈 股票数量: {len(symbols)}")
-        print("=" * 60)
+        logger = logging.getLogger(__name__)
+        logger.info("🌐 使用Stooq初始化股票数据库")
+        logger.info(f"💾 数据库路径: {self.db_path}")
+        logger.info(f"📅 数据时间范围: {start_date} 至今")
+        logger.info(f"📈 股票数量: {len(symbols)}")
+        logger.info("=" * 60)
         
         # 测试Stooq连接
-        print("🔍 测试Stooq连接...")
+        logging.getLogger(__name__).info("🔍 测试Stooq连接…")
         if not self.downloader.test_connection():
-            print("❌ Stooq连接失败，无法初始化数据库")
+            logging.getLogger(__name__).error("❌ Stooq连接失败，无法初始化数据库")
             results['connection_error'] = True
             return results
         
-        print("✅ Stooq连接正常，开始下载数据...\n")
+        logging.getLogger(__name__).info("✅ Stooq连接正常，开始下载数据…")
         
         for i, symbol in enumerate(symbols):
-            print(f"[{i+1}/{len(symbols)}] 处理 {symbol}...")
+            logging.getLogger(__name__).info(f"[{i+1}/{len(symbols)}] 处理 {symbol}…")
             
             try:
                 # 从Stooq下载数据
                 stock_data = self.downloader.download_stock_data(symbol, start_date)
                 
                 if 'error' in stock_data:
-                    print(f"❌ {symbol} 下载失败: {stock_data['error']}")
+                    logging.getLogger(__name__).warning(f"❌ {symbol} 下载失败: {stock_data['error']}")
                     results['failed'] += 1
                     results['details'][symbol] = 'download_failed'
                     continue
@@ -85,13 +86,13 @@ class StooqDatabaseInitializer:
                 # 存储到数据库
                 self.database.store_comprehensive_data(symbol, comprehensive_data)
                 
-                print(f"✅ {symbol} 完成 ({stock_data['data_points']} 个数据点)")
+                logging.getLogger(__name__).info(f"✅ {symbol} 完成 ({stock_data['data_points']} 个数据点)")
                 results['successful'] += 1
                 results['details'][symbol] = 'success'
                 
             except Exception as e:
                 self.logger.error(f"处理 {symbol} 时出错: {str(e)}")
-                print(f"❌ {symbol} 处理失败: {str(e)}")
+                logging.getLogger(__name__).error(f"❌ {symbol} 处理失败: {str(e)}")
                 results['failed'] += 1
                 results['details'][symbol] = 'processing_failed'
         
@@ -142,22 +143,23 @@ class StooqDatabaseInitializer:
     
     def _display_results(self, results: Dict):
         """显示初始化结果"""
-        print("\n" + "=" * 60)
-        print("📊 数据库初始化结果:")
-        print("=" * 60)
-        print(f"✅ 成功: {results['successful']} 个股票")
-        print(f"❌ 失败: {results['failed']} 个股票")
-        print(f"📊 成功率: {results['success_rate']:.1f}%")
-        print(f"⏰ 总耗时: {self._calculate_duration(results['start_time'], results['end_time'])}")
+        logger = logging.getLogger(__name__)
+        logger.info("=" * 60)
+        logger.info("📊 数据库初始化结果:")
+        logger.info("=" * 60)
+        logger.info(f"✅ 成功: {results['successful']} 个股票")
+        logger.info(f"❌ 失败: {results['failed']} 个股票")
+        logger.info(f"📊 成功率: {results['success_rate']:.1f}%")
+        logger.info(f"⏰ 总耗时: {self._calculate_duration(results['start_time'], results['end_time'])}")
         
         if results['failed'] > 0:
-            print(f"\n❌ 失败的股票:")
+            logging.getLogger(__name__).info("❌ 失败的股票:")
             for symbol, status in results['details'].items():
                 if status != 'success':
-                    print(f"   • {symbol}: {status}")
+                    logging.getLogger(__name__).info(f"   • {symbol}: {status}")
         
-        print(f"\n💾 数据库文件: {self.db_path}")
-        print(f"📈 数据源: Stooq")
+        logging.getLogger(__name__).info(f"💾 数据库文件: {self.db_path}")
+        logging.getLogger(__name__).info("📈 数据源: Stooq")
     
     def _calculate_duration(self, start_time: str, end_time: str) -> str:
         """计算执行时间"""
@@ -171,7 +173,7 @@ class StooqDatabaseInitializer:
     
     def verify_database(self) -> Dict:
         """验证数据库内容"""
-        print("\n🔍 验证数据库内容...")
+        logging.getLogger(__name__).info("🔍 验证数据库内容…")
         
         try:
             # 获取股票列表
@@ -183,7 +185,7 @@ class StooqDatabaseInitializer:
                 'sample_data': {}
             }
             
-            print(f"📈 数据库中共有 {len(existing_symbols)} 个股票")
+            logging.getLogger(__name__).info(f"📈 数据库中共有 {len(existing_symbols)} 个股票")
             
             # 检查所有股票的数据并找出最早时间
             earliest_date = None
@@ -205,12 +207,12 @@ class StooqDatabaseInitializer:
                     if earliest_date is None or min_date < earliest_date:
                         earliest_date = min_date
                     
-                    print(f"   {symbol}: {len(price_data)} 条记录, 时间范围: {min_date} 到 {max_date}, 最新价格: ${latest_price:.2f}")
+                    logging.getLogger(__name__).info(f"   {symbol}: {len(price_data)} 条记录, 时间范围: {min_date} 到 {max_date}, 最新价格: ${latest_price:.2f}")
             
             # 显示整个数据库的最早数据时间
             if earliest_date:
                 verification['earliest_date'] = earliest_date
-                print(f"\n📅 数据库最早数据时间: {earliest_date}")
+                logging.getLogger(__name__).info(f"📅 数据库最早数据时间: {earliest_date}")
             
             return verification
             
@@ -244,15 +246,11 @@ def main():
     args = parser.parse_args()
     
     # 配置日志
-    level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
-    )
+    from logging_utils import setup_logging
+    setup_logging('INFO' if args.verbose else 'WARNING')
     
-    print("🌐 Stooq股票数据库初始化器")
-    print("=" * 50)
+    logging.getLogger(__name__).info("🌐 Stooq股票数据库初始化器")
+    logging.getLogger(__name__).info("=" * 50)
     
     # 创建初始化器
     initializer = StooqDatabaseInitializer(
@@ -265,23 +263,23 @@ def main():
             # 仅验证现有数据库
             verification = initializer.verify_database()
             if 'error' not in verification:
-                print(f"\n✅ 数据库验证完成")
+                logging.getLogger(__name__).info("✅ 数据库验证完成")
             else:
-                print(f"\n❌ 数据库验证失败: {verification['error']}")
+                logging.getLogger(__name__).error(f"❌ 数据库验证失败: {verification['error']}")
         
         else:
             # 初始化数据库
             if args.use_watchlist:
                 symbols = create_default_watchlist()
-                print(f"📋 使用默认观察清单: {len(symbols)} 个股票")
+                logging.getLogger(__name__).info(f"📋 使用默认观察清单: {len(symbols)} 个股票")
             elif args.symbols:
                 symbols = [s.upper() for s in args.symbols]
-                print(f"📋 自定义股票清单: {len(symbols)} 个股票")
+                logging.getLogger(__name__).info(f"📋 自定义股票清单: {len(symbols)} 个股票")
             else:
-                print("❌ 请指定股票代码或使用 --use-watchlist 参数")
-                print("💡 示例用法:")
-                print("   python init_database_stooq.py --use-watchlist")
-                print("   python init_database_stooq.py --symbols AAPL GOOGL MSFT")
+                logging.getLogger(__name__).error("❌ 请指定股票代码或使用 --use-watchlist 参数")
+                logging.getLogger(__name__).info("💡 示例用法:")
+                logging.getLogger(__name__).info("   python init_database_stooq.py --use-watchlist")
+                logging.getLogger(__name__).info("   python init_database_stooq.py --symbols AAPL GOOGL MSFT")
                 return
             
             # 执行初始化
@@ -291,9 +289,9 @@ def main():
             if results['successful'] > 0:
                 initializer.verify_database()
                 
-                print(f"\n💡 后续可以使用常规data_manager操作此数据库:")
-                print(f"   python data_manager.py --db-path {args.db_path} --action info")
-                print(f"   python data_manager.py --db-path {args.db_path} --action report")
+                logging.getLogger(__name__).info("💡 后续可以使用常规data_manager操作此数据库:")
+                logging.getLogger(__name__).info(f"   python data_manager.py --db-path {args.db_path} --action info")
+                logging.getLogger(__name__).info(f"   python data_manager.py --db-path {args.db_path} --action report")
             
     finally:
         initializer.close()

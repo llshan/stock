@@ -7,6 +7,7 @@ GCP数据库设置模块
 import os
 import sys
 import logging
+from logging_utils import setup_logging
 from typing import Dict, Optional
 
 # 添加父目录到Python路径
@@ -17,8 +18,8 @@ try:
     import sqlalchemy
     from analyzer.database import StockDatabase
 except ImportError as e:
-    print(f"需要安装GCP依赖: {e}")
-    print("请运行: pip install google-cloud-sql-python-connector sqlalchemy psycopg2-binary")
+    logging.getLogger(__name__).error(f"需要安装GCP依赖: {e}")
+    logging.getLogger(__name__).info("请运行: pip install google-cloud-sql-python-connector sqlalchemy psycopg2-binary")
 
 class GCPStockDatabase(StockDatabase):
     def __init__(self, project_id: str, region: str, instance_name: str, 
@@ -169,12 +170,13 @@ def create_database_connection() -> Optional[GCPStockDatabase]:
         return None
 
 if __name__ == "__main__":
-    print("🗄️ GCP Cloud SQL 设置指南")
-    print("=" * 50)
-    print("\n1. 执行以下命令创建 Cloud SQL 实例:")
-    print(create_cloud_sql_instance())
+    setup_logging()
+    logging.getLogger(__name__).info("🗄️ GCP Cloud SQL 设置指南")
+    logging.getLogger(__name__).info("=" * 50)
+    logging.getLogger(__name__).info("\n1. 执行以下命令创建 Cloud SQL 实例:")
+    logging.getLogger(__name__).info(create_cloud_sql_instance())
     
-    print("\n2. 设置环境变量:")
+    logging.getLogger(__name__).info("\n2. 设置环境变量:")
     config = get_database_config()
     for key, value in config.items():
         env_key = key.upper().replace('_', '_')
@@ -182,7 +184,7 @@ if __name__ == "__main__":
             env_key = f"GCP_{env_key}" if key == 'project_id' else f"CLOUD_SQL_{env_key}"
         else:
             env_key = f"CLOUD_SQL_{env_key}"
-        print(f"export {env_key}={value or 'YOUR_VALUE_HERE'}")
+        logging.getLogger(__name__).info(f"export {env_key}={value or 'YOUR_VALUE_HERE'}")
     
-    print("\n3. 测试数据库连接:")
-    print("python cloud/database_setup.py")
+    logging.getLogger(__name__).info("\n3. 测试数据库连接:")
+    logging.getLogger(__name__).info("python cloud/database_setup.py")

@@ -6,14 +6,12 @@ Stooq股票数据下载器
 
 import pandas as pd
 import pandas_datareader as pdr
-import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 import time
 import logging
-import requests
-from .base_downloader import BaseDownloader
-from .models import StockData, PriceData, SummaryStats
+from .base import BaseDownloader
+from ..models import StockData, PriceData, SummaryStats
 
 class StooqDataDownloader(BaseDownloader):
     def __init__(self, max_retries: int = 3, base_delay: int = 5):
@@ -176,74 +174,44 @@ class StooqDataDownloader(BaseDownloader):
         self.logger.info(f"✅ Stooq批量下载完成，成功: {successful}/{total}")
         return results
     
-    def compare_with_yfinance_format(self, stooq_data: Union[StockData, Dict]) -> Union[StockData, Dict]:
-        """
-        确保Stooq数据格式与yfinance兼容
-        
-        Args:
-            stooq_data: Stooq下载的数据
-            
-        Returns:
-            格式化后的数据
-        """
-        if isinstance(stooq_data, dict) and 'error' in stooq_data:
-            return stooq_data
-        
-        # 已经在_download_stooq_data中处理了格式兼容性
-        if isinstance(stooq_data, StockData):
-            # 更新数据源信息
-            return StockData(
-                symbol=stooq_data.symbol,
-                start_date=stooq_data.start_date,
-                end_date=stooq_data.end_date,
-                data_points=stooq_data.data_points,
-                price_data=stooq_data.price_data,
-                summary_stats=stooq_data.summary_stats,
-                downloaded_at=stooq_data.downloaded_at,
-                data_source='Stooq (compatible with yfinance format)',
-                incremental_update=stooq_data.incremental_update,
-                no_new_data=stooq_data.no_new_data
-            )
-        else:
-            # 处理dict格式的数据
-            stooq_data['data_source'] = 'Stooq (compatible with yfinance format)'
-            return stooq_data
+    # 该下载器已在 _download_stooq_data 中输出统一的 StockData 格式，无需额外格式化
 
 if __name__ == "__main__":
     # 测试Stooq下载器
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    
-    print("🌐 Stooq股票数据下载器测试")
-    print("=" * 50)
+    from logging_utils import setup_logging
+    setup_logging()
+    logging.getLogger(__name__).info("🌐 Stooq股票数据下载器测试")
+    logging.getLogger(__name__).info("=" * 50)
     
     downloader = StooqDataDownloader()
     
     # 测试连接
     if downloader.test_connection():
-        print("\n✅ Stooq连接测试成功")
+        logging.getLogger(__name__).info("✅ Stooq连接测试成功")
         
         # 测试单个股票下载
-        print(f"\n📈 测试下载AAPL数据...")
+        logging.getLogger(__name__).info("📈 测试下载AAPL数据…")
         result = downloader.download_stock_data('AAPL', start_date='2000-01-01')
         
-        if 'error' not in result:
-            print(f"✅ AAPL数据下载成功:")
-            print(f"   数据点数: {result['data_points']}")
-            print(f"   时间范围: {result['start_date']} 到 {result['end_date']}")
-            print(f"   最新价格: ${result['price_data']['close'][-1]:.2f}")
-        else:
-            print(f"❌ AAPL数据下载失败: {result['error']}")
+        if isinstance(result, dict) and 'error' in result:
+            logging.getLogger(__name__).error(f"❌ AAPL数据下载失败: {result['error']}")
+        elif hasattr(result, 'data_points'):
+            logging.getLogger(__name__).info("✅ AAPL数据下载成功:")
+            logging.getLogger(__name__).info(f"   数据点数: {result.data_points}")
+            logging.getLogger(__name__).info(f"   时间范围: {result.start_date} 到 {result.end_date}")
+            if result.price_data and result.price_data.close:
+                logging.getLogger(__name__).info(f"   最新价格: ${result.price_data.close[-1]:.2f}")
         
         # 测试批量下载
-        print(f"\n📊 测试批量下载...")
+        logging.getLogger(__name__).info("📊 测试批量下载…")
         symbols = ['AAPL', 'GOOGL', 'MSFT']
         batch_results = downloader.batch_download(symbols, start_date='2000-01-01')
         
         for symbol, data in batch_results.items():
-            if 'error' not in data:
-                print(f"✅ {symbol}: {data['data_points']} 个数据点")
-            else:
-                print(f"❌ {symbol}: {data['error']}")
+            if isinstance(data, dict) and 'error' in data:
+                logging.getLogger(__name__).error(f"❌ {symbol}: {data['error']}")
+            elif hasattr(data, 'data_points'):
+                logging.getLogger(__name__).info(f"✅ {symbol}: {data.data_points} 个数据点")
     
     else:
-        print("\n❌ Stooq连接测试失败，请检查网络连接")
+        logging.getLogger(__name__).error("❌ Stooq连接测试失败，请检查网络连接")

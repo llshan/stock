@@ -7,10 +7,11 @@
 import os
 import json
 import logging
+from logging_utils import setup_logging
 from datetime import datetime
 from typing import Dict, Any
 
-from data_service.yfinance_downloader import YFinanceDataDownloader, create_watchlist
+from data_service.downloaders.yfinance import YFinanceDataDownloader, create_watchlist
 
 # 尝试导入数据库功能
 try:
@@ -21,7 +22,7 @@ except ImportError:
     logging.warning("数据库功能不可用")
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 def data_download_job(request):
@@ -140,7 +141,8 @@ def data_download_job(request):
 
 # 本地测试入口点
 if __name__ == "__main__":
-    print("🧪 本地测试数据下载功能")
+    setup_logging()
+    logging.getLogger(__name__).info("🧪 本地测试数据下载功能")
     
     # 模拟请求对象
     class MockRequest:
@@ -156,5 +158,5 @@ if __name__ == "__main__":
     # 执行测试
     mock_request = MockRequest()
     result = data_download_job(mock_request)
-    print("📊 测试结果:")
-    print(result)
+    logging.getLogger(__name__).info("📊 测试结果:")
+    logging.getLogger(__name__).info(result)

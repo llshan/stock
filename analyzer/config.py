@@ -7,6 +7,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Any
 import os
+import logging
 
 
 @dataclass
@@ -88,6 +89,18 @@ class ChartConfig:
 
 
 @dataclass
+class PipelineConfig:
+    """分析流水线配置"""
+    enabled_operators: List[str] = field(default_factory=lambda: [
+        'ma', 'rsi', 'drop_alert'
+    ])
+    # 跌幅预警参数
+    drop_alert_days: int = 1
+    drop_alert_threshold: float = 15.0
+    drop_alert_7d_threshold: float = 20.0
+
+
+@dataclass
 class DataFetchConfig:
     """数据获取配置"""
     # API请求限制
@@ -132,6 +145,7 @@ class Config:
     chart: ChartConfig = field(default_factory=ChartConfig)
     data: DataFetchConfig = field(default_factory=DataFetchConfig)
     app: ApplicationConfig = field(default_factory=ApplicationConfig)
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'Config':
@@ -141,7 +155,8 @@ class Config:
             financial=FinancialAnalysisConfig(**config_dict.get('financial', {})),
             chart=ChartConfig(**config_dict.get('chart', {})),
             data=DataFetchConfig(**config_dict.get('data', {})),
-            app=ApplicationConfig(**config_dict.get('app', {}))
+            app=ApplicationConfig(**config_dict.get('app', {})),
+            pipeline=PipelineConfig(**config_dict.get('pipeline', {}))
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -151,7 +166,8 @@ class Config:
             'financial': self.financial.__dict__,
             'chart': self.chart.__dict__,
             'data': self.data.__dict__,
-            'app': self.app.__dict__
+            'app': self.app.__dict__,
+            'pipeline': self.pipeline.__dict__
         }
     
     def ensure_directories(self):
@@ -183,7 +199,7 @@ def load_config_from_file(filepath: str) -> Config:
             config_dict = json.load(f)
         return Config.from_dict(config_dict)
     except Exception as e:
-        print(f"加载配置文件失败: {e}, 使用默认配置")
+        logging.getLogger(__name__).warning(f"加载配置文件失败: {e}, 使用默认配置")
         return Config()
 
 
@@ -194,9 +210,9 @@ def save_config_to_file(config: Config, filepath: str):
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
-        print(f"配置已保存到: {filepath}")
+        logging.getLogger(__name__).info(f"配置已保存到: {filepath}")
     except Exception as e:
-        print(f"保存配置文件失败: {e}")
+        logging.getLogger(__name__).error(f"保存配置文件失败: {e}")
 
 
 # 环境变量配置覆盖
@@ -225,5 +241,5 @@ def load_env_overrides():
     set_config(config)
 
 
-# 初始化时加载环境变量覆盖
-load_env_overrides()
+# 注意：不在导入时自动加载环境变量覆盖，
+# 由应用入口或显式初始化流程调用。

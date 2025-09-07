@@ -249,7 +249,7 @@ class ComprehensiveData:
 
 
 @dataclass
-class DownloadError:
+class DownloadErrorInfo:
     """下载错误模型"""
     symbol: str
     error_message: str
@@ -261,7 +261,7 @@ class DownloadError:
         return asdict(self)
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DownloadError':
+    def from_dict(cls, data: Dict[str, Any]) -> 'DownloadErrorInfo':
         """从字典创建实例"""
         return cls(**data)
 

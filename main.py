@@ -7,12 +7,13 @@ GCP Cloud Function 入口点
 import os
 import json
 import logging
+from logging_utils import setup_logging
 from datetime import datetime
 from typing import Dict, Any
 from google.cloud import storage
 from analyzer.comprehensive_analyzer import ComprehensiveStockAnalyzer
-from analyzer.stock_analyzer import StockAnalyzer, StockDataFetcher
-from data_service.yfinance_downloader import YFinanceDataDownloader
+from analyzer.app.runner import run_analysis_for_symbols, build_operators
+from data_service.downloaders.yfinance import YFinanceDataDownloader
 
 # 尝试导入数据库功能
 try:
@@ -22,8 +23,8 @@ except ImportError:
     DATABASE_AVAILABLE = False
     logger.warning("数据库功能不可用，将只使用Cloud Storage存储")
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
+# 配置日志（统一入口）
+setup_logging()
 logger = logging.getLogger(__name__)
 
 def stock_analysis_job(request=None):
@@ -92,22 +93,14 @@ def run_comprehensive_analysis(symbols: list) -> Dict[str, Any]:
     """执行综合分析"""
     try:
         logger.info("📈 开始综合分析...")
-        analyzer = ComprehensiveStockAnalyzer()
-        results = analyzer.run_comprehensive_analysis(symbols, period="6mo")
-        
-        # 处理结果，移除不可序列化的数据
+        results = run_analysis_for_symbols(symbols, db_path=os.environ.get('DB_PATH', 'stock_data.db'))
         processed_results = {}
         for symbol, data in results.items():
+            ops = data.get('operators', {})
             processed_results[symbol] = {
-                'comprehensive_report': data['comprehensive_report'],
-                'technical_summary': extract_technical_summary(data.get('technical_analysis', {})),
-                'financial_summary': extract_financial_summary(data.get('financial_analysis', {})),
-                'price_drop_alerts': {
-                    '1d': data.get('drop_check_1d', {}),
-                    '7d': data.get('drop_check_7d', {})
-                }
+                'operators': ops,
+                'summary': data.get('summary', {})
             }
-        
         logger.info("✅ 综合分析完成")
         return processed_results
         
@@ -119,32 +112,26 @@ def run_price_drop_monitoring(symbols: list) -> Dict[str, Any]:
     """执行价格下跌监控"""
     try:
         logger.info("⚠️ 开始价格下跌监控...")
-        data_fetcher = StockDataFetcher()
-        analyzer = StockAnalyzer(data_fetcher)
-        
-        # 检查 1天和7天的价格下跌
-        results_1d = analyzer.batch_check_price_drops(symbols, days=1, threshold_percent=15.0)
-        results_7d = analyzer.batch_check_price_drops(symbols, days=7, threshold_percent=20.0)
-        
-        combined_monitoring = {
-            '1_day_monitoring': results_1d,
-            '7_day_monitoring': results_7d,
-            'urgent_alerts': []
+        # 1天与7天分别运行
+        res_1d = run_analysis_for_symbols(symbols, db_path=os.environ.get('DB_PATH', 'stock_data.db'), enabled_operators=['drop_alert'])
+        res_7d = run_analysis_for_symbols(symbols, db_path=os.environ.get('DB_PATH', 'stock_data.db'), enabled_operators=['drop_alert_7d'])
+        alerts_1d = []
+        alerts_7d = []
+        for sym, data in res_1d.items():
+            da = data.get('operators', {}).get('drop_alert', {})
+            if da and not da.get('error') and da.get('is_alert'):
+                alerts_1d.append({'symbol': sym, **da})
+        for sym, data in res_7d.items():
+            da7 = data.get('operators', {}).get('drop_alert_7d', {})
+            if da7 and not da7.get('error') and da7.get('is_alert'):
+                alerts_7d.append({'symbol': sym, **da7})
+        combined = {
+            '1_day_monitoring': {'alerts': alerts_1d},
+            '7_day_monitoring': {'alerts': alerts_7d},
+            'urgent_alerts': [a for a in alerts_1d if abs(a.get('percent_change', 0)) >= 20]
         }
-        
-        # 提取紧急警告
-        if results_1d and results_1d.get('alerts'):
-            for alert in results_1d['alerts']:
-                if abs(alert['percent_change']) >= 20:  # 超过20%的急剧下跌
-                    combined_monitoring['urgent_alerts'].append({
-                        'symbol': alert['symbol'],
-                        'change': alert['percent_change'],
-                        'period': '1天',
-                        'severity': 'HIGH'
-                    })
-        
         logger.info("✅ 价格下跌监控完成")
-        return combined_monitoring
+        return combined
         
     except Exception as e:
         logger.error(f"❌ 价格下跌监控失败: {str(e)}")
@@ -213,33 +200,26 @@ def run_full_data_download(symbols: list) -> Dict[str, Any]:
         logger.error(f"❌ 完整数据下载失败: {str(e)}")
         return {'error': str(e)}
 
-def extract_technical_summary(technical_data: Dict) -> Dict:
-    """提取技术分析摘要"""
-    if 'error' in technical_data:
-        return {'error': technical_data['error']}
-    
+def extract_technical_summary(operators: Dict) -> Dict:
+    """从 operators 结果提取技术摘要"""
+    rsi = operators.get('rsi', {})
     return {
-        'trend': technical_data.get('trend', 'N/A'),
-        'rsi': technical_data.get('rsi', 0),
-        'rsi_signal': technical_data.get('rsi_signal', 'N/A'),
-        'bb_position': technical_data.get('bb_position', 0)
+        'trend': 'N/A',
+        'rsi': rsi.get('rsi', 0),
+        'rsi_signal': rsi.get('signal', 'N/A'),
     }
 
-def extract_financial_summary(financial_data: Dict) -> Dict:
-    """提取财务分析摘要"""
-    if 'error' in financial_data:
-        return {'error': financial_data['error']}
-    
-    ratios = financial_data.get('ratios', {})
-    health_data = financial_data.get('health_data', {})
-    
+def extract_financial_summary(operators: Dict) -> Dict:
+    """从 operators 结果提取财务摘要"""
+    ratios = operators.get('fin_ratios', {})
+    health = operators.get('fin_health', {})
     return {
         'net_profit_margin': ratios.get('net_profit_margin', 0),
         'roe': ratios.get('roe', 0),
         'pe_ratio': ratios.get('pe_ratio', 0),
         'debt_ratio': ratios.get('debt_ratio', 0),
-        'health_grade': health_data.get('grade', 'N/A'),
-        'health_score': health_data.get('health_score', 0)
+        'health_grade': health.get('grade', 'N/A'),
+        'health_score': health.get('health_score', 0)
     }
 
 def generate_summary(comprehensive_results: Dict, drop_monitor_results: Dict) -> Dict:
@@ -257,20 +237,19 @@ def generate_summary(comprehensive_results: Dict, drop_monitor_results: Dict) ->
     # 统计综合分析结果
     if 'error' not in comprehensive_results:
         summary['total_stocks_analyzed'] = len(comprehensive_results)
-        
         for symbol, data in comprehensive_results.items():
-            if 'error' in data.get('comprehensive_report', {}):
+            if 'error' in data:
                 summary['failed_analysis'] += 1
             else:
                 summary['successful_analysis'] += 1
-                
-                # 检查评级
-                rating = data.get('comprehensive_report', {}).get('overall_rating', '')
-                if rating.startswith('A') or rating.startswith('B'):
+                # 根据健康评分判断高评级
+                ops = data.get('operators', {})
+                fin = extract_financial_summary(ops)
+                if fin.get('health_grade', '').startswith(('A','B')):
                     summary['high_rated_stocks'].append({
                         'symbol': symbol,
-                        'rating': rating,
-                        'recommendation': data.get('comprehensive_report', {}).get('investment_recommendation', '')
+                        'rating': fin.get('health_grade'),
+                        'recommendation': ''
                     })
     
     # 统计价格下跌警告
@@ -328,10 +307,10 @@ def upload_results_to_gcs(results: Dict, bucket_name: str):
 
 # 本地测试入口点
 if __name__ == "__main__":
-    print("🧪 本地测试模式")
+    logger.info("🧪 本地测试模式")
     os.environ.setdefault('GCS_BUCKET_NAME', 'test-stock-analysis')
     os.environ.setdefault('STOCK_SYMBOLS', 'AAPL,GOOGL,MSFT')
     
     result = stock_analysis_job()
-    print("📊 测试结果:")
-    print(result)
+    logger.info("📊 测试结果:")
+    logger.info(result)
