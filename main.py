@@ -12,7 +12,7 @@ from typing import Dict, Any
 from google.cloud import storage
 from analyzer.comprehensive_analyzer import ComprehensiveStockAnalyzer
 from analyzer.stock_analyzer import StockAnalyzer, StockDataFetcher
-from analyzer.yfinance_downloader import StockDataDownloader
+from data_service.yfinance_downloader import YFinanceDataDownloader
 
 # 尝试导入数据库功能
 try:
@@ -156,7 +156,7 @@ def run_full_data_download(symbols: list) -> Dict[str, Any]:
         logger.info("💾 开始完整数据下载和存储...")
         
         # 创建数据下载器
-        downloader = StockDataDownloader()
+        downloader = YFinanceDataDownloader()
         
         # 创建数据库连接（如果可用）
         database = None

@@ -6,7 +6,7 @@
 from .stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
 from .financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
 from .comprehensive_analyzer import ComprehensiveStockAnalyzer
-from .yfinance_downloader import StockDataDownloader
+from .yfinance_downloader import YFinanceDataDownloader
 from .database import StockDatabase
 
 __all__ = [
@@ -17,6 +17,6 @@ __all__ = [
     'FinancialDataFetcher',
     'FinancialChartGenerator',
     'ComprehensiveStockAnalyzer',
-    'StockDataDownloader',
+    'YFinanceDataDownloader',
     'StockDatabase'
 ]

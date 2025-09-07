@@ -5,20 +5,15 @@
 使用新的DataService架构进行数据管理
 """
 
-import os
-import sys
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 
-# 添加当前目录到Python路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from Stock.data_service.stooq_downloader import StooqDataDownloader
-from Stock.data_service.yfinance_downloader import StockDataDownloader
-from Stock.data_service.database import StockDatabase
-from Stock.data_service.services import DataService
+from .stooq_downloader import StooqDataDownloader
+from .yfinance_downloader import YFinanceDataDownloader
+from .database import StockDatabase
+from .services.data_service import DataService
 
 
 class DownloadStrategy(ABC):
@@ -249,7 +244,7 @@ class HybridStockDownloader:
         
         # 创建下载器实例
         stooq_downloader = StooqDataDownloader(max_retries=max_retries)
-        yfinance_downloader = StockDataDownloader(
+        yfinance_downloader = YFinanceDataDownloader(
             max_retries=max_retries, 
             base_delay=base_delay
         )

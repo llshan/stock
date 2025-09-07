@@ -1,19 +1,9 @@
-import os
-import sys
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
 
-# 处理相对导入和直接运行的问题
-if __name__ == "__main__":
-    # 当直接运行时，添加父目录到路径
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from Stock.data_service.stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
-    from Stock.data_service.financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
-else:
-    # 导入现有模块
-    from .stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
-    from .financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
+from .stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
+from .financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
 
 class ComprehensiveStockAnalyzer:
     def __init__(self):

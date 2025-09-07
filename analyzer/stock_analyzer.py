@@ -1,65 +1,44 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
-import requests
-import time
 from typing import Dict, List, Optional
+from .data_fetcher import DataFetcher, get_data_fetcher
+from .config import get_config
+from .chart_generator import get_chart_generator
 
+# 保留StockDataFetcher类以维持向后兼容性
 class StockDataFetcher:
-    def __init__(self):
-        pass
+    """
+    股票数据获取器（兼容性包装器）
+    已被统一的DataFetcher替代，保留此类仅为向后兼容
+    """
+    def __init__(self, data_fetcher: DataFetcher = None):
+        self._data_fetcher = data_fetcher or get_data_fetcher()
     
     def get_real_time_data(self, symbol: str) -> Dict:
-        try:
-            time.sleep(1)  # Add delay to avoid rate limiting
-            ticker = yf.Ticker(symbol)
-            
-            # Try to get current data without info first
-            history = ticker.history(period="1d", interval="5m")
-            
-            if not history.empty:
-                current_price = history['Close'].iloc[-1]
-                prev_price = history['Close'].iloc[0] if len(history) > 1 else current_price
-                change = current_price - prev_price
-                change_percent = (change / prev_price) * 100 if prev_price != 0 else 0
-                
-                return {
-                    'symbol': symbol,
-                    'current_price': current_price,
-                    'change': change,
-                    'change_percent': change_percent,
-                    'volume': history['Volume'].iloc[-1],
-                    'timestamp': history.index[-1]
-                }
-            else:
-                return {'error': f'无法获取 {symbol} 的实时数据'}
-        except Exception as e:
-            return {'error': f'获取实时数据时出错: {str(e)}'}
+        return self._data_fetcher.get_real_time_data(symbol)
     
     def get_historical_data(self, symbol: str, period: str = "1y", interval: str = "1d") -> pd.DataFrame:
-        try:
-            time.sleep(1)  # Add delay to avoid rate limiting
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(period=period, interval=interval)
-            return data
-        except Exception as e:
-            print(f"获取历史数据时出错: {str(e)}")
-            return pd.DataFrame()
+        return self._data_fetcher.get_stock_data(symbol, period=period, interval=interval)
 
 class StockAnalyzer:
-    def __init__(self, data_fetcher: StockDataFetcher):
-        self.data_fetcher = data_fetcher
+    def __init__(self, data_fetcher: StockDataFetcher = None):
+        self.data_fetcher = data_fetcher or StockDataFetcher()
+        self.config = get_config()
     
-    def calculate_moving_averages(self, data: pd.DataFrame, windows: List[int] = [5, 10, 20, 50]) -> pd.DataFrame:
+    def calculate_moving_averages(self, data: pd.DataFrame, windows: List[int] = None) -> pd.DataFrame:
+        if windows is None:
+            windows = self.config.technical.ma_windows
         for window in windows:
             data[f'MA_{window}'] = data['Close'].rolling(window=window).mean()
         return data
     
-    def calculate_rsi(self, data: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    def calculate_rsi(self, data: pd.DataFrame, period: int = None) -> pd.DataFrame:
+        if period is None:
+            period = self.config.technical.rsi_period
         delta = data['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
@@ -67,7 +46,11 @@ class StockAnalyzer:
         data['RSI'] = 100 - (100 / (1 + rs))
         return data
     
-    def calculate_bollinger_bands(self, data: pd.DataFrame, period: int = 20, std_dev: int = 2) -> pd.DataFrame:
+    def calculate_bollinger_bands(self, data: pd.DataFrame, period: int = None, std_dev: float = None) -> pd.DataFrame:
+        if period is None:
+            period = self.config.technical.bb_period
+        if std_dev is None:
+            std_dev = self.config.technical.bb_std
         data['BB_Middle'] = data['Close'].rolling(window=period).mean()
         data['BB_Upper'] = data['BB_Middle'] + (data['Close'].rolling(window=period).std() * std_dev)
         data['BB_Lower'] = data['BB_Middle'] - (data['Close'].rolling(window=period).std() * std_dev)
@@ -237,9 +220,9 @@ class StockAnalyzer:
         else:
             analysis_result['trend'] = '下降趋势'
         
-        if latest_data['RSI'] > 70:
+        if latest_data['RSI'] > self.config.technical.rsi_overbought:
             analysis_result['rsi_signal'] = '超买'
-        elif latest_data['RSI'] < 30:
+        elif latest_data['RSI'] < self.config.technical.rsi_oversold:
             analysis_result['rsi_signal'] = '超卖'
         else:
             analysis_result['rsi_signal'] = '中性'
@@ -248,11 +231,12 @@ class StockAnalyzer:
 
 class ChartGenerator:
     def __init__(self):
+        self.config = get_config()
         try:
-            plt.style.use('seaborn-v0_8')
+            plt.style.use(self.config.chart.plt_style)
         except:
             try:
-                plt.style.use('seaborn')
+                plt.style.use(self.config.chart.plt_fallback_style)
             except:
                 pass
     
@@ -297,7 +281,9 @@ class ChartGenerator:
             fig.show()
     
     def create_rsi_chart(self, data: pd.DataFrame, symbol: str, save_path: Optional[str] = None):
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), height_ratios=[3, 1])
+        fig, (ax1, ax2) = plt.subplots(2, 1, 
+                                      figsize=self.config.chart.rsi_figsize, 
+                                      height_ratios=self.config.chart.candlestick_height_ratios)
         
         ax1.plot(data.index, data['Close'], label='收盘价', linewidth=1)
         ax1.set_title(f'{symbol} 股价和RSI指标')
@@ -305,10 +291,22 @@ class ChartGenerator:
         ax1.legend()
         ax1.grid(True, alpha=0.3)
         
-        ax2.plot(data.index, data['RSI'], label='RSI', color='orange', linewidth=1)
-        ax2.axhline(y=70, color='r', linestyle='--', alpha=0.7, label='超买线(70)')
-        ax2.axhline(y=30, color='g', linestyle='--', alpha=0.7, label='超卖线(30)')
-        ax2.fill_between(data.index, 30, 70, alpha=0.1, color='gray')
+        ax2.plot(data.index, data['RSI'], label='RSI', color=self.config.chart.colors['secondary'], linewidth=1)
+        ax2.axhline(y=self.config.technical.rsi_overbought, 
+                   color=self.config.chart.rsi_overbought_color, 
+                   linestyle='--', 
+                   alpha=self.config.chart.rsi_line_alpha, 
+                   label=f'超买线({self.config.technical.rsi_overbought})')
+        ax2.axhline(y=self.config.technical.rsi_oversold, 
+                   color=self.config.chart.rsi_oversold_color, 
+                   linestyle='--', 
+                   alpha=self.config.chart.rsi_line_alpha, 
+                   label=f'超卖线({self.config.technical.rsi_oversold})')
+        ax2.fill_between(data.index, 
+                        self.config.technical.rsi_oversold, 
+                        self.config.technical.rsi_overbought, 
+                        alpha=self.config.chart.rsi_neutral_alpha, 
+                        color=self.config.chart.colors['neutral_color'])
         ax2.set_ylabel('RSI')
         ax2.set_xlabel('日期')
         ax2.legend()
@@ -317,7 +315,7 @@ class ChartGenerator:
         plt.tight_layout()
         
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.savefig(save_path, dpi=self.config.chart.save_dpi, bbox_inches='tight')
             plt.close()
         else:
             plt.show()
@@ -480,3 +478,22 @@ if __name__ == "__main__":
     print("   result = analyzer.check_price_drop('AAPL', days=1, threshold_percent=15.0)")
     print("   if result['is_drop_alert']:")
     print("       print(f'警告: {result['alert_message']}')")
+
+
+# 兼容性ChartGenerator类 - 包装新的统一图表生成器
+class ChartGenerator:
+    """
+    图表生成器（兼容性包装器）
+    已被统一的ChartGenerator替代，保留此类仅为向后兼容
+    """
+    def __init__(self):
+        self._chart_generator = get_chart_generator()
+    
+    def create_candlestick_chart(self, data: pd.DataFrame, symbol: str, save_path: Optional[str] = None):
+        return self._chart_generator.create_candlestick_chart(data, symbol, save_path)
+    
+    def create_rsi_chart(self, data: pd.DataFrame, symbol: str, save_path: Optional[str] = None):
+        return self._chart_generator.create_rsi_chart(data, symbol, save_path)
+    
+    def create_bollinger_bands_chart(self, data: pd.DataFrame, symbol: str, save_path: Optional[str] = None):
+        return self._chart_generator.create_bollinger_bands_chart(data, symbol, save_path)

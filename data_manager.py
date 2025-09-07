@@ -14,7 +14,7 @@ from typing import List, Dict
 # 添加当前目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from analyzer.yfinance_downloader import StockDataDownloader, create_watchlist
+from data_service.yfinance_downloader import YFinanceDataDownloader, create_watchlist
 from analyzer.database import StockDatabase
 from analyzer.hybrid_downloader import HybridStockDownloader
 
@@ -29,7 +29,7 @@ class StockDataManager:
             self.downloader = HybridStockDownloader(self.database, max_retries, base_delay)
         else:
             # 使用传统yfinance下载器
-            self.downloader = StockDataDownloader(
+            self.downloader = YFinanceDataDownloader(
                 database=self.database, 
                 max_retries=max_retries, 
                 base_delay=base_delay

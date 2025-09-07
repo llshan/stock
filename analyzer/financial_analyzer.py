@@ -1,38 +1,39 @@
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
-import time
 from typing import Dict, List, Optional
 import warnings
+from .data_fetcher import DataFetcher, get_data_fetcher
+from .config import get_config
+
 warnings.filterwarnings('ignore')
 
 class FinancialDataFetcher:
-    def __init__(self):
-        pass
+    """
+    财务数据获取器（兼容性包装器）
+    已被统一的DataFetcher替代，保留此类仅为向后兼容
+    """
+    def __init__(self, data_fetcher: DataFetcher = None):
+        self._data_fetcher = data_fetcher or get_data_fetcher()
     
     def get_financial_statements(self, symbol: str) -> Dict[str, pd.DataFrame]:
         """获取财务报表数据"""
         try:
-            time.sleep(1)  # 避免请求限制
-            ticker = yf.Ticker(symbol)
+            financial_data = self._data_fetcher.get_financial_data(symbol)
             
-            # 获取财务报表
-            income_stmt = ticker.financials  # 利润表
-            balance_sheet = ticker.balance_sheet  # 资产负债表
-            cash_flow = ticker.cashflow  # 现金流量表
-            
-            # 获取关键指标
-            key_stats = ticker.info
+            # 检查是否有错误
+            if 'error' in financial_data:
+                print(f"获取 {symbol} 财务数据时出错: {financial_data['error']}")
+                return {}
             
             return {
-                'income_statement': income_stmt,
-                'balance_sheet': balance_sheet,
-                'cash_flow': cash_flow,
-                'key_stats': key_stats
+                'income_statement': financial_data.get('income_statement', pd.DataFrame()),
+                'balance_sheet': financial_data.get('balance_sheet', pd.DataFrame()),
+                'cash_flow': financial_data.get('cash_flow', pd.DataFrame()),
+                'key_stats': financial_data.get('info', {})
             }
         except Exception as e:
             print(f"获取 {symbol} 财务数据时出错: {str(e)}")
@@ -41,26 +42,26 @@ class FinancialDataFetcher:
     def get_quarterly_data(self, symbol: str) -> Dict[str, pd.DataFrame]:
         """获取季度财务数据"""
         try:
-            time.sleep(1)
-            ticker = yf.Ticker(symbol)
+            financial_data = self._data_fetcher.get_financial_data(symbol)
             
-            # 获取季度财务报表
-            quarterly_income = ticker.quarterly_financials
-            quarterly_balance = ticker.quarterly_balance_sheet
-            quarterly_cashflow = ticker.quarterly_cashflow
+            # 检查是否有错误
+            if 'error' in financial_data:
+                print(f"获取 {symbol} 季度财务数据时出错: {financial_data['error']}")
+                return {}
             
             return {
-                'quarterly_income': quarterly_income,
-                'quarterly_balance': quarterly_balance,
-                'quarterly_cashflow': quarterly_cashflow
+                'quarterly_income': financial_data.get('quarterly_financials', pd.DataFrame()),
+                'quarterly_balance': financial_data.get('quarterly_balance_sheet', pd.DataFrame()),
+                'quarterly_cashflow': financial_data.get('quarterly_cashflow', pd.DataFrame())
             }
         except Exception as e:
             print(f"获取 {symbol} 季度财务数据时出错: {str(e)}")
             return {}
 
 class FinancialAnalyzer:
-    def __init__(self, data_fetcher: FinancialDataFetcher):
-        self.data_fetcher = data_fetcher
+    def __init__(self, data_fetcher: FinancialDataFetcher = None):
+        self.data_fetcher = data_fetcher or FinancialDataFetcher()
+        self.config = get_config()
     
     def calculate_financial_ratios(self, symbol: str) -> Dict:
         """计算关键财务比率"""

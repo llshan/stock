@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union, Type
 from Stock.data_service.database import StockDatabase
-from Stock.data_service.yfinance_downloader import StockDataDownloader
+from Stock.data_service.yfinance_downloader import YFinanceDataDownloader
 from Stock.data_service.stooq_downloader import StooqDataDownloader
 from Stock.data_service.models import (
     StockData, FinancialData, ComprehensiveData, DataQuality,
@@ -23,7 +23,7 @@ class DataService:
     """
     
     def __init__(self, database: StockDatabase, 
-                 stock_downloader: Optional[StockDataDownloader] = None,
+                 stock_downloader: Optional[YFinanceDataDownloader] = None,
                  stooq_downloader: Optional[StooqDataDownloader] = None):
         """
         初始化数据服务
@@ -34,7 +34,7 @@ class DataService:
             stooq_downloader: Stooq数据下载器
         """
         self.database = database
-        self.stock_downloader = stock_downloader or StockDataDownloader()
+        self.stock_downloader = stock_downloader or YFinanceDataDownloader()
         self.stooq_downloader = stooq_downloader or StooqDataDownloader()
         self.logger = logging.getLogger(__name__)
     

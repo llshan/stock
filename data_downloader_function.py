@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any
 
-from analyzer.yfinance_downloader import StockDataDownloader, create_watchlist
+from data_service.yfinance_downloader import YFinanceDataDownloader, create_watchlist
 
 # 尝试导入数据库功能
 try:
@@ -55,7 +55,7 @@ def data_download_job(request):
         logger.info(f"📅 开始日期: {start_date}")
         
         # 创建数据下载器
-        downloader = StockDataDownloader()
+        downloader = YFinanceDataDownloader()
         
         # 创建数据库连接（如果可用）
         database = None

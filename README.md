@@ -137,10 +137,11 @@ python data_manager.py --action backup --backup-path backup.db
 
 **编程方式使用:**
 ```python
-from analyzer import StockDataDownloader, StockDatabase
+from data_service.yfinance_downloader import YFinanceDataDownloader
+from data_service.database import StockDatabase
 
 # 创建下载器和数据库
-downloader = StockDataDownloader()
+downloader = YFinanceDataDownloader()
 database = StockDatabase("my_stock_data.db")
 
 # 下载并存储数据

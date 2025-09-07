@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 股票数据下载器
-下载从2020年开始的股票价格数据和财务报表
+下载从2000年开始的股票价格数据和财务报表
 """
 
 import yfinance as yf
@@ -19,11 +19,11 @@ from .models import (
     create_empty_stock_data, create_empty_financial_data
 )
 
-class StockDataDownloader(BaseDownloader):
+class YFinanceDataDownloader(BaseDownloader):
     def __init__(self, max_retries=3, base_delay=30):
         """初始化股票数据下载器"""
         super().__init__(max_retries=max_retries, base_delay=base_delay)
-        self.start_date = "2020-01-01"
+        self.start_date = "2000-01-01"
     
         
 
@@ -33,7 +33,7 @@ class StockDataDownloader(BaseDownloader):
         
         Args:
             symbol: 股票代码
-            start_date: 开始日期，默认2020-01-01
+            start_date: 开始日期，默认2000-01-01
             incremental: 是否进行增量下载
             use_retry: 是否使用重试机制
             
@@ -412,7 +412,7 @@ if __name__ == "__main__":
     print("💡 要使用完整功能（包括数据库），请使用 DataService 类")
     
     # 创建下载器
-    downloader = StockDataDownloader()
+    downloader = YFinanceDataDownloader()
     
     # 获取关注股票列表
     watchlist = create_watchlist()
@@ -453,7 +453,7 @@ if __name__ == "__main__":
             print(f"   {symbol}: 数据下载完成")
     
     print(f"\n💡 要使用完整的数据管理功能（包括数据库存储），请参考:")
-    print("   from Stock.data_service.services import DataService")
-    print("   from Stock.data_service.database import StockDatabase")
+    print("   from data_service.services import DataService")
+    print("   from data_service.database import StockDatabase")
     print("   data_service = DataService(StockDatabase('stocks.db'))")
     print("   data_service.batch_download_and_store(symbols)")
