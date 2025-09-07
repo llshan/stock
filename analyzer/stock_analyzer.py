@@ -221,7 +221,7 @@ class StockAnalyzer:
         
         latest_data = data.iloc[-1]
         
-        analysis = {
+        analysis_result = {
             'symbol': symbol,
             'current_price': latest_data['Close'],
             'ma_5': latest_data['MA_5'],
@@ -233,18 +233,18 @@ class StockAnalyzer:
         }
         
         if latest_data['Close'] > latest_data['MA_20']:
-            analysis['trend'] = '上升趋势'
+            analysis_result['trend'] = '上升趋势'
         else:
-            analysis['trend'] = '下降趋势'
+            analysis_result['trend'] = '下降趋势'
         
         if latest_data['RSI'] > 70:
-            analysis['rsi_signal'] = '超买'
+            analysis_result['rsi_signal'] = '超买'
         elif latest_data['RSI'] < 30:
-            analysis['rsi_signal'] = '超卖'
+            analysis_result['rsi_signal'] = '超卖'
         else:
-            analysis['rsi_signal'] = '中性'
+            analysis_result['rsi_signal'] = '中性'
         
-        return analysis
+        return analysis_result
 
 class ChartGenerator:
     def __init__(self):
@@ -396,33 +396,33 @@ class StockAnalysisApp:
             else:
                 print(f"实时数据获取失败: {real_time['error']}")
             
-            analysis = self.analyzer.analyze_stock(symbol, period)
-            if 'error' not in analysis:
-                print(f"趋势: {analysis['trend']}")
-                print(f"RSI: {analysis['rsi']:.2f} ({analysis['rsi_signal']})")
-                print(f"布林带位置: {analysis['bb_position']:.2f}")
+            analysis_result = self.analyzer.analyze_stock(symbol, period)
+            if 'error' not in analysis_result:
+                print(f"趋势: {analysis_result['trend']}")
+                print(f"RSI: {analysis_result['rsi']:.2f} ({analysis_result['rsi_signal']})")
+                print(f"布林带位置: {analysis_result['bb_position']:.2f}")
                 
                 try:
                     import os
                     os.makedirs('results', exist_ok=True)
                     
                     self.chart_generator.create_candlestick_chart(
-                        analysis['data'], symbol, f"results/{symbol}_candlestick.html"
+                        analysis_result['data'], symbol, f"results/{symbol}_candlestick.html"
                     )
                     self.chart_generator.create_rsi_chart(
-                        analysis['data'], symbol, f"results/{symbol}_rsi.png"
+                        analysis_result['data'], symbol, f"results/{symbol}_rsi.png"
                     )
                     self.chart_generator.create_bollinger_bands_chart(
-                        analysis['data'], symbol, f"results/{symbol}_bollinger.html"
+                        analysis_result['data'], symbol, f"results/{symbol}_bollinger.html"
                     )
                     print(f"图表已生成: results/{symbol}_candlestick.html, results/{symbol}_rsi.png, results/{symbol}_bollinger.html")
                 except Exception as e:
                     print(f"图表生成失败: {str(e)}")
                 
-                results[symbol] = analysis
+                results[symbol] = analysis_result
             else:
-                print(f"分析失败: {analysis['error']}")
-                results[symbol] = analysis
+                print(f"分析失败: {analysis_result['error']}")
+                results[symbol] = analysis_result
         
         return results
 

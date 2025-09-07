@@ -8,8 +8,8 @@ from typing import Dict, List, Optional
 if __name__ == "__main__":
     # 当直接运行时，添加父目录到路径
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from analyzer.stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
-    from analyzer.financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
+    from Stock.data_service.stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
+    from Stock.data_service.financial_analyzer import FinancialAnalyzer, FinancialDataFetcher, FinancialChartGenerator
 else:
     # 导入现有模块
     from .stock_analyzer import StockAnalyzer, StockDataFetcher, ChartGenerator
@@ -101,31 +101,31 @@ class ComprehensiveStockAnalyzer:
                 print(f"   ❌ 实时数据获取失败: {real_time['error']}")
             
             # 技术指标分析
-            analysis = self.stock_analyzer.analyze_stock(symbol, period)
+            analysis_result = self.stock_analyzer.analyze_stock(symbol, period)
             
-            if 'error' not in analysis:
-                print(f"   📈 趋势: {analysis['trend']}")
-                print(f"   🎯 RSI: {analysis['rsi']:.2f} ({analysis['rsi_signal']})")
-                print(f"   📉 布林带位置: {analysis['bb_position']:.2f}")
+            if 'error' not in analysis_result:
+                print(f"   📈 趋势: {analysis_result['trend']}")
+                print(f"   🎯 RSI: {analysis_result['rsi']:.2f} ({analysis_result['rsi_signal']})")
+                print(f"   📉 布林带位置: {analysis_result['bb_position']:.2f}")
                 
                 # 生成技术分析图表
                 try:
                     self.stock_chart_generator.create_candlestick_chart(
-                        analysis['data'], symbol, f"results/{symbol}_candlestick.html"
+                        analysis_result['data'], symbol, f"results/{symbol}_candlestick.html"
                     )
                     self.stock_chart_generator.create_rsi_chart(
-                        analysis['data'], symbol, f"results/{symbol}_rsi.png"
+                        analysis_result['data'], symbol, f"results/{symbol}_rsi.png"
                     )
                     self.stock_chart_generator.create_bollinger_bands_chart(
-                        analysis['data'], symbol, f"results/{symbol}_bollinger.html"
+                        analysis_result['data'], symbol, f"results/{symbol}_bollinger.html"
                     )
                     print(f"   📊 技术分析图表已生成")
                 except Exception as e:
                     print(f"   ⚠️ 图表生成失败: {str(e)}")
             else:
-                print(f"   ❌ 技术分析失败: {analysis['error']}")
+                print(f"   ❌ 技术分析失败: {analysis_result['error']}")
             
-            return analysis
+            return analysis_result
                 
         except Exception as e:
             print(f"   ❌ 技术分析失败: {str(e)}")

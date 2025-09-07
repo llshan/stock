@@ -14,7 +14,7 @@ from typing import List, Dict
 # 添加当前目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from analyzer.data_downloader import StockDataDownloader, create_watchlist
+from analyzer.yfinance_downloader import StockDataDownloader, create_watchlist
 from analyzer.database import StockDatabase
 from analyzer.hybrid_downloader import HybridStockDownloader
 

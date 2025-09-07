@@ -12,7 +12,7 @@ from typing import Dict, Any
 from google.cloud import storage
 from analyzer.comprehensive_analyzer import ComprehensiveStockAnalyzer
 from analyzer.stock_analyzer import StockAnalyzer, StockDataFetcher
-from analyzer.data_downloader import StockDataDownloader
+from analyzer.yfinance_downloader import StockDataDownloader
 
 # 尝试导入数据库功能
 try:

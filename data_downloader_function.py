@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any
 
-from analyzer.data_downloader import StockDataDownloader, create_watchlist
+from analyzer.yfinance_downloader import StockDataDownloader, create_watchlist
 
 # 尝试导入数据库功能
 try:
