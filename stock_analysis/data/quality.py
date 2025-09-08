@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Dict, Union
 
-from .models import StockData, FinancialData, DataQuality
+from .models import DataQuality, FinancialData, StockData
 
 
 def _get_quality_grade(score: float) -> str:
@@ -23,9 +23,11 @@ def _get_quality_grade(score: float) -> str:
         return 'F - 很差'
 
 
-def assess_data_quality(stock_data: Union[StockData, Dict],
-                        financial_data: Union[FinancialData, Dict],
-                        start_date: str) -> DataQuality:
+def assess_data_quality(
+    stock_data: Union[StockData, Dict],
+    financial_data: Union[FinancialData, Dict],
+    start_date: str,
+) -> DataQuality:
     """评估数据质量（供 Service 与 Downloader 共享）"""
     stock_available = False
     financial_available = False
@@ -64,7 +66,7 @@ def assess_data_quality(stock_data: Union[StockData, Dict],
     else:
         issues.append('财务数据不可用')
 
-    completeness_score = 0
+    completeness_score = 0.0
     if stock_available:
         completeness_score += 0.6
     if financial_available:
@@ -79,6 +81,5 @@ def assess_data_quality(stock_data: Union[StockData, Dict],
         quality_grade=quality_grade,
         issues=issues,
         stock_data_completeness=stock_data_completeness,
-        financial_statements_count=financial_statements_count
+        financial_statements_count=financial_statements_count,
     )
-

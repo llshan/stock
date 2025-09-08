@@ -8,11 +8,15 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any
 import logging
-import pandas as pd
-from .base import Operator
+from typing import TYPE_CHECKING, Any, Dict
 
+import pandas as pd
+
+if TYPE_CHECKING:
+    from ..pipeline.context import AnalysisContext
+
+from .base import Operator
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +48,13 @@ class DropAlertOperator(Operator):
             'past_price': past_price,
             'percent_change': percent,
             'is_alert': is_alert,
-            'message': self._message(ctx.symbol, percent, is_alert)
+            'message': self._message(ctx.symbol, percent, is_alert),
         }
 
     def _message(self, symbol: str, percent: float, is_alert: bool) -> str:
         if is_alert:
-            return f"⚠️ {symbol} 近{self.days}日下跌 {abs(percent):.2f}%（超过阈值 {self.threshold}%）"
+            return (
+                f"⚠️ {symbol} 近{self.days}日下跌 {abs(percent):.2f}%（超过阈值 {self.threshold}%）"
+            )
         direction = "上涨" if percent > 0 else ("下跌" if percent < 0 else "持平")
         return f"{symbol} 近{self.days}日{direction} {abs(percent):.2f}%"

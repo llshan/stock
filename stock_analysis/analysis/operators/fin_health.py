@@ -8,10 +8,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any
 import logging
-from .base import Operator
+from typing import TYPE_CHECKING, Any, Dict
 
+if TYPE_CHECKING:
+    from ..pipeline.context import AnalysisContext
+
+from .base import Operator
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +61,8 @@ class FinancialHealthOperator(Operator):
                 score += 5
 
         grade = (
-            'A' if score >= 80 else
-            'B' if score >= 60 else
-            'C' if score >= 40 else
-            'D' if score >= 20 else 'F'
+            'A'
+            if score >= 80
+            else ('B' if score >= 60 else 'C' if score >= 40 else 'D' if score >= 20 else 'F')
         )
         return {'health_score': score, 'grade': grade}

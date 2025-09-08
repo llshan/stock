@@ -8,11 +8,15 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, List
 import logging
-import pandas as pd
-from .base import Operator
+from typing import TYPE_CHECKING, Any, Dict, List
 
+import pandas as pd
+
+if TYPE_CHECKING:
+    from ..pipeline.context import AnalysisContext
+
+from .base import Operator
 
 logger = logging.getLogger(__name__)
 

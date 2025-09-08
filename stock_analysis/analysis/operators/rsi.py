@@ -8,11 +8,15 @@ RSI 算子（相对强弱指数）
 
 from __future__ import annotations
 
-from typing import Dict, Any
 import logging
-import pandas as pd
-from .base import Operator
+from typing import TYPE_CHECKING, Any, Dict
 
+import pandas as pd
+
+if TYPE_CHECKING:
+    from ..pipeline.context import AnalysisContext
+
+from .base import Operator
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +31,8 @@ class RSIOperator(Operator):
         data: pd.DataFrame = ctx.extras.get('ma_data')
         if data is None:
             data = ctx.data.copy()
-        period = self.period or getattr(ctx.config.technical, 'rsi_period', 14)
+        period = self.period if self.period is not None else getattr(ctx.config.technical, 'rsi_period', 14)
+        period = int(period) if period is not None else 14
         if 'Close' not in data.columns or len(data) < period + 1:
             return {'error': 'insufficient_data'}
         delta = data['Close'].diff()
