@@ -68,26 +68,6 @@ class DataService:
             self.logger.warning(f"获取 {symbol} 最后更新日期失败: {str(e)}")
             return None
     
-    # download_stock_data 已并入 download_and_store_stock_data，避免语义重复
-    
-    def download_financial_data(self, symbol: str, use_retry: bool = True) -> Union[FinancialData, Dict[str, str]]:
-        """
-        下载财务数据
-        
-        Args:
-            symbol: 股票代码
-            use_retry: 是否使用重试机制
-            
-        Returns:
-            财务数据或错误信息
-        """
-        try:
-            return self.yfinance_downloader.download_financial_data(symbol, use_retry)
-        except Exception as e:
-            error_msg = f"通过数据服务下载 {symbol} 财务数据失败: {str(e)}"
-            self.logger.error(error_msg)
-            return {'error': error_msg}
-    
     def download_and_store_stock_data(self, symbol: str, start_date: Optional[str] = None) -> Dict[str, Any]:
         """
         下载并存储股票数据（统一走 Hybrid，内部已入库）
@@ -237,6 +217,58 @@ class DataService:
                 'error': error_msg,
                 'symbol': symbol
             }
+
+    def download_and_store_financial_data(self, symbol: str) -> Dict[str, Any]:
+        """
+        下载并存储财务数据（带刷新阈值）。
+
+        - 如果最近财报期间距今不超过阈值（默认 90 天），则跳过并返回 no_new_data。
+        - 否则使用 yfinance 下载财报并入库。
+        """
+        try:
+            # 判定是否需要刷新
+            try:
+                last_period = self.storage.get_last_financial_period(symbol)
+            except Exception:
+                last_period = None
+
+            need_refresh = True
+            if last_period:
+                try:
+                    days = (datetime.now() - datetime.strptime(last_period, '%Y-%m-%d')).days
+                    threshold = getattr(self.config.downloader, 'financial_refresh_days', 90)
+                    need_refresh = days > threshold
+                except Exception:
+                    need_refresh = True
+
+            if not need_refresh:
+                return {
+                    'success': True,
+                    'symbol': symbol,
+                    'no_new_data': True,
+                    'used_strategy': 'skip_recent_financial'
+                }
+
+            fin = self.yfinance_downloader.download_financial_data(symbol, use_retry=True)
+            if isinstance(fin, dict) and 'error' in fin:
+                return {'success': False, 'symbol': symbol, 'error': fin['error']}
+
+            if isinstance(fin, FinancialData):
+                self.storage.store_financial_data(symbol, fin)
+                stmt_count = len(fin.financial_statements)
+                return {
+                    'success': True,
+                    'symbol': symbol,
+                    'statements': stmt_count,
+                    'used_strategy': 'yfinance_financial'
+                }
+
+            return {'success': False, 'symbol': symbol, 'error': f'未知数据格式: {type(fin)}'}
+
+        except Exception as e:
+            error_msg = f"下载并存储 {symbol} 财务数据失败: {str(e)}"
+            self.logger.error(error_msg)
+            return {'success': False, 'error': error_msg, 'symbol': symbol}
     
     def batch_download_and_store(self, symbols: List[str], start_date: Optional[str] = None,
                                include_financial: bool = True) -> Dict[str, Dict]:
