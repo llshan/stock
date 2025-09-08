@@ -8,12 +8,16 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any, Optional
 import logging
-import pandas as pd
-from .base import Operator
-from ..data.financial_repository import DatabaseFinancialRepository
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
+import pandas as pd
+
+if TYPE_CHECKING:
+    from ..pipeline.context import AnalysisContext
+
+from ..data.financial_repository import DatabaseFinancialRepository
+from .base import Operator
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,17 @@ class FinancialRatioOperator(Operator):
 
         revenue = get(inc, ['Total Revenue', 'Revenue', 'Total revenue']) or 0.0
         net_income = get(inc, ['Net Income', 'Net income', 'NetIncome']) or 0.0
-        total_equity = get(bal, ['Total Stockholder Equity', 'Total Equity', 'Stockholders Equity']) or 0.0
+        total_equity = (
+            get(
+                bal,
+                [
+                    'Total Stockholder Equity',
+                    'Total Equity',
+                    'Stockholders Equity',
+                ],
+            )
+            or 0.0
+        )
         total_assets = get(bal, ['Total Assets']) or 0.0
         total_liab = get(bal, ['Total Liab', 'Total Liabilities']) or 0.0
 
@@ -66,7 +80,11 @@ class FinancialRatioOperator(Operator):
             ratios['debt_ratio'] = (total_liab / total_assets) * 100.0
 
         # PE requires price and EPS; fallback to price/ (net_income/shares)
-        price = float(ctx.data['Close'].iloc[-1]) if 'Close' in ctx.data.columns and len(ctx.data) else None
+        price = (
+            float(ctx.data['Close'].iloc[-1])
+            if 'Close' in ctx.data.columns and len(ctx.data)
+            else None
+        )
         shares = get(bal, ['Common Shares Outstanding', 'Shares Outstanding'])
         if price is not None and shares and shares > 0 and net_income:
             eps = net_income / shares

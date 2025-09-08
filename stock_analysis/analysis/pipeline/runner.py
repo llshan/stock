@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional
 import logging
 import time
-from ..config import get_config, Config
-from ..data.price_repository import DatabasePriceDataRepository, PriceDataRepository, TimeRange
-from .context import AnalysisContext
-from .engine import PipelineEngine
+from typing import Any, Dict, List, Optional
+
+from ..config import Config, get_config
+from ..core.contracts import (
+    AnalysisResult,
+    AnalysisSummary,
+    Error,
+    OperatorResult,
+)
+from ..data.price_repository import (
+    DatabasePriceDataRepository,
+    PriceDataRepository,
+    TimeRange,
+)
 from ..operators.base import Operator
+from ..operators.drop_alert import DropAlertOperator
 from ..operators.ma import MovingAverageOperator
 from ..operators.rsi import RSIOperator
-from ..operators.drop_alert import DropAlertOperator
-from ..core.contracts import AnalysisResult, AnalysisSummary, OperatorResult, Error
-
+from .context import AnalysisContext
+from .engine import PipelineEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,18 +49,21 @@ def build_operators(enabled: Optional[List[str]] = None) -> List[Operator]:
         elif name == "fin_ratios":
             try:
                 from ..operators.fin_ratios import FinancialRatioOperator
+
                 ops.append(FinancialRatioOperator())
             except Exception as e:
                 logger.warning(f"load fin_ratios failed: {e}")
         elif name == "fin_health":
             try:
                 from ..operators.fin_health import FinancialHealthOperator
+
                 ops.append(FinancialHealthOperator())
             except Exception as e:
                 logger.warning(f"load fin_health failed: {e}")
         elif name == "drop_alert_7d":
             try:
                 from ..operators.drop_alert_7d import DropAlert7dOperator
+
                 cfg = get_config()
                 th7 = getattr(cfg.pipeline, 'drop_alert_7d_threshold', 20.0)
                 ops.append(DropAlert7dOperator(threshold_percent=th7))
@@ -81,7 +93,7 @@ def run_analysis_for_symbols(
     time_range = TimeRange(start=start or cfg.data.default_start_date, end=end)
 
     results: Dict[str, Any] = {}
-    started_at = time.perf_counter()
+    time.perf_counter()
 
     try:
         for sym in symbols:
@@ -91,8 +103,19 @@ def run_analysis_for_symbols(
                 logger.warning(f"[{sym}] not found in database; skip")
                 ar = AnalysisResult(
                     operators={},
-                    summary=AnalysisSummary(trend='unknown', rsi_signal='n/a', drop_alert=False, drop_change=None),
-                    errors=[Error(code='symbol_not_in_database', message='symbol not found', severity='warn')],
+                    summary=AnalysisSummary(
+                        trend='unknown',
+                        rsi_signal='n/a',
+                        drop_alert=False,
+                        drop_change=None,
+                    ),
+                    errors=[
+                        Error(
+                            code='symbol_not_in_database',
+                            message='symbol not found',
+                            severity='warn',
+                        )
+                    ],
                     metrics={'rows': 0, 'duration_ms': 0},
                 )
                 results[sym] = ar.to_dict()
@@ -102,8 +125,19 @@ def run_analysis_for_symbols(
                 logger.warning(f"[{sym}] no OHLCV data in range; skip")
                 ar = AnalysisResult(
                     operators={},
-                    summary=AnalysisSummary(trend='unknown', rsi_signal='n/a', drop_alert=False, drop_change=None),
-                    errors=[Error(code='no_data', message='no data in range', severity='warn')],
+                    summary=AnalysisSummary(
+                        trend='unknown',
+                        rsi_signal='n/a',
+                        drop_alert=False,
+                        drop_change=None,
+                    ),
+                    errors=[
+                        Error(
+                            code='no_data',
+                            message='no data in range',
+                            severity='warn',
+                        )
+                    ],
                     metrics={'rows': 0, 'duration_ms': 0},
                 )
                 results[sym] = ar.to_dict()
@@ -147,7 +181,7 @@ def _summarize(ctx: AnalysisContext, op_results: Dict[str, OperatorResult]) -> A
     ma_res = op_results.get('ma')
     if ma_res and not ma_res.error and 'ma_20' in (ma_res.data or {}) and 'ma_data' in ctx.extras:
         last_close = float(ctx.extras['ma_data']['Close'].iloc[-1])
-        ma20_raw = ma_res.data.get('ma_20')
+        ma20_raw = ma_res.data.get('ma_20') if ma_res.data else None
         ma20 = float(ma20_raw) if ma20_raw is not None else None
         if ma20 is not None:
             trend = 'up' if last_close > ma20 else 'down'
@@ -165,10 +199,15 @@ def _summarize(ctx: AnalysisContext, op_results: Dict[str, OperatorResult]) -> A
         drop_alert = bool(d.get('is_alert', False))
         drop_change = d.get('percent_change')
 
-    return AnalysisSummary(trend=trend, rsi_signal=rsi_sig, drop_alert=drop_alert, drop_change=drop_change)
+    return AnalysisSummary(
+        trend=trend,
+        rsi_signal=rsi_sig,
+        drop_alert=drop_alert,
+        drop_change=drop_change,
+    )
 
 
-def _log_summary(symbol: str, summary: AnalysisSummary):
+def _log_summary(symbol: str, summary: AnalysisSummary) -> None:
     logger.info(
         f"[{symbol}] trend={summary.trend} rsi={summary.rsi_signal} "
         f"drop_alert={summary.drop_alert} change={summary.drop_change}%"

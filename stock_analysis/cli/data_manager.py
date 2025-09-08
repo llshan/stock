@@ -9,14 +9,14 @@
 
 import argparse
 import logging
-from typing import List
 from pathlib import Path
+from typing import List
 
 import pandas as pd
 
-from stock_analysis.utils.logging_utils import setup_logging
 from stock_analysis.data import DataService, create_storage
 from stock_analysis.data.config import get_default_watchlist
+from stock_analysis.utils.logging_utils import setup_logging
 
 
 def cmd_download(args: argparse.Namespace) -> int:
@@ -52,9 +52,7 @@ def cmd_download(args: argparse.Namespace) -> int:
             f"开始下载综合数据（价格+财务） {len(symbols)} 个，起始: {args.start_date or '自动增量'}"
         )
     elif mode == 'financial':
-        logger.info(
-            f"开始下载财务数据 {len(symbols)} 个"
-        )
+        logger.info(f"开始下载财务数据 {len(symbols)} 个")
     else:
         logger.info(
             f"开始下载价格数据 {len(symbols)} 个，起始: {args.start_date or '自动增量'}（策略：新股Stooq全量，老股<=阈值天数用yfinance，否则Stooq）"
@@ -62,7 +60,7 @@ def cmd_download(args: argparse.Namespace) -> int:
 
     # 逐只下载并入库（DataService 内部自动选择来源）
     results = {}
-    strategy_usage = {}
+    strategy_usage: dict[str, int] = {}
     ok = 0
     for i, sym in enumerate(symbols):
         try:
@@ -96,7 +94,9 @@ def cmd_download(args: argparse.Namespace) -> int:
         except Exception as e:
             results[sym] = {'success': False, 'error': str(e)}
         if i < len(symbols) - 1:
-            import time; time.sleep(2)
+            import time
+
+            time.sleep(2)
 
     fail = len(symbols) - ok
     logger.info(f"完成：成功{ok}，失败{fail}")
@@ -110,12 +110,22 @@ def cmd_download(args: argparse.Namespace) -> int:
                 stock_r = r.get('stock', {})
                 fin_r = r.get('financial', {})
                 stock_msg = (
-                    "已最新" if stock_r.get('no_new_data') else f"入库{stock_r.get('data_points', 0)}条"
-                ) if isinstance(stock_r, dict) else "完成"
+                    (
+                        "已最新"
+                        if stock_r.get('no_new_data')
+                        else f"入库{stock_r.get('data_points', 0)}条"
+                    )
+                    if isinstance(stock_r, dict)
+                    else "完成"
+                )
                 if fin_r.get('no_new_data'):
                     fin_msg = "已最新（跳过）"
                 else:
-                    fin_msg = f"写入{fin_r.get('statements', '?')}份报表" if 'statements' in fin_r else "完成"
+                    fin_msg = (
+                        f"写入{fin_r.get('statements', '?')}份报表"
+                        if 'statements' in fin_r
+                        else "完成"
+                    )
                 logger.info(f"{sym}: 价格={stock_msg}，财务={fin_msg}")
             elif mode == 'financial':
                 if r.get('no_new_data'):
@@ -128,7 +138,9 @@ def cmd_download(args: argparse.Namespace) -> int:
                 if r.get('no_new_data'):
                     logger.info(f"{sym}: 已最新，无需更新{f'（策略：{used}）' if used else ''}")
                 else:
-                    logger.info(f"{sym}: 入库 {r.get('data_points', 0)} 条{f'（策略：{used}）' if used else ''}")
+                    logger.info(
+                        f"{sym}: 入库 {r.get('data_points', 0)} 条{f'（策略：{used}）' if used else ''}"
+                    )
         else:
             logger.warning(f"{sym}: 失败 - {r.get('error','未知错误')}")
 
@@ -146,7 +158,9 @@ def cmd_query(args: argparse.Namespace) -> int:
 
     dbp = str(Path(args.db_path))
     storage = create_storage('sqlite', db_path=dbp)
-    data = storage.get_stock_data(args.symbol.upper(), start_date=args.start_date, end_date=args.end_date)
+    data = storage.get_stock_data(
+        args.symbol.upper(), start_date=args.start_date, end_date=args.end_date
+    )
 
     if data is None or data.data_points == 0:
         logger.info("无数据")
@@ -178,13 +192,13 @@ def cmd_query(args: argparse.Namespace) -> int:
         pd.set_option('display.float_format', '{:.4f}'.format)
     except Exception:
         pass
-    
+
     # 打印前后各 N 行
     n = min(args.limit, len(df))
-    
+
     print("\n前几行:")
     print(df.head(n).to_string(index=True, justify='right', col_space=10))
-    
+
     if len(df) > n:
         print("\n后几行:")
         print(df.tail(n).to_string(index=True, justify='right', col_space=10))
@@ -207,10 +221,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     # 下载模式：互斥
     mode_group = dl.add_mutually_exclusive_group()
-    mode_group.add_argument('--comprehensive', action='store_true', help='下载价格+财务并入库（综合）')
-    mode_group.add_argument('--financial-only', dest='financial_only', action='store_true', help='仅下载财务并入库')
-    mode_group.add_argument('--stock-only', dest='stock_only', action='store_true', help='仅下载价格并入库（默认）')
-    dl.add_argument('--use-default-watchlist', action='store_true', help='使用默认关注列表（配置或环境变量 WATCHLIST）')
+    mode_group.add_argument(
+        '--comprehensive',
+        action='store_true',
+        help='下载价格+财务并入库（综合）',
+    )
+    mode_group.add_argument(
+        '--financial-only',
+        dest='financial_only',
+        action='store_true',
+        help='仅下载财务并入库',
+    )
+    mode_group.add_argument(
+        '--stock-only',
+        dest='stock_only',
+        action='store_true',
+        help='仅下载价格并入库（默认）',
+    )
+    dl.add_argument(
+        '--use-default-watchlist',
+        action='store_true',
+        help='使用默认关注列表（配置或环境变量 WATCHLIST）',
+    )
     dl.add_argument('-v', '--verbose', action='store_true', help='详细日志')
     dl.set_defaults(func=cmd_download)
 
@@ -227,10 +259,14 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main():
+def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        args.func(args)
+        return 0
+    except Exception:
+        return 1
 
 
 if __name__ == '__main__':

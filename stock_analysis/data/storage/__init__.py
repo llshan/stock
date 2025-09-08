@@ -4,21 +4,24 @@
 提供统一的数据存储接口和多种存储实现
 """
 
+from typing import Any
+
 from .base import BaseStorage, StorageError
 from .sqlite_storage import SQLiteStorage
 
+
 # 存储工厂函数
-def create_storage(storage_type: str = "sqlite", **kwargs) -> BaseStorage:
+def create_storage(storage_type: str = "sqlite", **kwargs: Any) -> BaseStorage:
     """
     创建存储实例的工厂函数
-    
+
     Args:
         storage_type: 存储类型 ('sqlite', 'postgresql', 等)
         **kwargs: 存储特定的配置参数
-        
+
     Returns:
         存储实例
-        
+
     Raises:
         StorageError: 不支持的存储类型
     """
@@ -28,16 +31,12 @@ def create_storage(storage_type: str = "sqlite", **kwargs) -> BaseStorage:
         # 'postgresql': PostgreSQLStorage,
         # 'redis': RedisStorage,
     }
-    
+
     if storage_type not in storage_map:
         raise StorageError(f"不支持的存储类型: {storage_type}")
-    
+
     storage_class = storage_map[storage_type]
     return storage_class(**kwargs)
 
-__all__ = [
-    'BaseStorage',
-    'StorageError', 
-    'SQLiteStorage',
-    'create_storage'
-]
+
+__all__ = ['BaseStorage', 'StorageError', 'SQLiteStorage', 'create_storage']

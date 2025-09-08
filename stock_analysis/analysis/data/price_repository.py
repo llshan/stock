@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, List, Dict, Tuple
+from typing import Any, Dict, Optional, Protocol, Tuple
+
 import pandas as pd
 
 from stock_analysis.data.storage import create_storage
@@ -19,18 +20,17 @@ from stock_analysis.data.storage import create_storage
 @dataclass
 class TimeRange:
     """时间范围（可选，使用字符串）"""
+
     start: Optional[str] = None  # 'YYYY-MM-DD'
-    end: Optional[str] = None    # 'YYYY-MM-DD'
+    end: Optional[str] = None  # 'YYYY-MM-DD'
 
 
 class PriceDataRepository(Protocol):
     """行情数据仓储接口（与 runner 保持一致）"""
 
-    def exists(self, symbol: str) -> bool:
-        ...
+    def exists(self, symbol: str) -> bool: ...
 
-    def get_ohlcv(self, symbol: str, time_range: Optional[TimeRange] = None) -> pd.DataFrame:
-        ...
+    def get_ohlcv(self, symbol: str, time_range: Optional[TimeRange] = None) -> pd.DataFrame: ...
 
 
 class DatabasePriceDataRepository(PriceDataRepository):
@@ -41,10 +41,10 @@ class DatabasePriceDataRepository(PriceDataRepository):
         self._symbols_cache: Optional[set[str]] = None
         self._cache: Dict[Tuple[str, Optional[str], Optional[str]], pd.DataFrame] = {}
 
-    def __enter__(self):
+    def __enter__(self) -> DatabasePriceDataRepository:
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         try:
             self.close()
         except Exception:
@@ -69,21 +69,23 @@ class DatabasePriceDataRepository(PriceDataRepository):
             df = pd.DataFrame()
             self._cache[key] = df
             return df
-        df = pd.DataFrame({
-            'Date': pd.to_datetime(stock.price_data.dates),
-            'Open': stock.price_data.open,
-            'High': stock.price_data.high,
-            'Low': stock.price_data.low,
-            'Close': stock.price_data.close,
-            'Adj Close': stock.price_data.adj_close or stock.price_data.close,
-            'Volume': stock.price_data.volume,
-        })
+        df = pd.DataFrame(
+            {
+                'Date': pd.to_datetime(stock.price_data.dates),
+                'Open': stock.price_data.open,
+                'High': stock.price_data.high,
+                'Low': stock.price_data.low,
+                'Close': stock.price_data.close,
+                'Adj Close': stock.price_data.adj_close or stock.price_data.close,
+                'Volume': stock.price_data.volume,
+            }
+        )
         df = df.set_index('Date').sort_index()
         df = df[['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]
         self._cache[key] = df
         return df
 
-    def close(self):
+    def close(self) -> None:
         try:
             close = getattr(self._db, 'close', None)
             if callable(close):
