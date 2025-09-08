@@ -4,20 +4,20 @@
 
 ## 🚀 快速开始
 
-### 推荐使用方式 - 便捷函数
+### 推荐使用方式 - DataService
 ```python
-from data_service import create_data_manager
+from data_service import DataService, create_storage
 
-# 🎯 推荐：一行代码创建完整数据管理器
-manager = create_data_manager("my_stocks.db")
+# 🎯 推荐：创建数据服务（价格走Hybrid，财务走yfinance）
+service = DataService(create_storage('sqlite', db_path="my_stocks.db"))
 
-# 智能下载（自动选择最佳策略）
-result = manager.download_stock_data("AAPL")
+# 智能下载并入库（自动选择最佳价格数据源）
+result = service.download_and_store_stock_data("AAPL")
 print(f"使用策略: {result.get('used_strategy')}")
 
 # 批量下载
 symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = {s: manager.download_stock_data(s) for s in symbols}
+results = service.batch_download_and_store(symbols, include_financial=False)
 ```
 
 ### 传统使用方式
@@ -159,27 +159,15 @@ graph TD
 
 ### 🎯 推荐API
 
-#### `create_data_manager(database_path, **config)` 
-创建智能数据管理器，**推荐使用**
+使用 DataService 作为统一入口
 ```python
-from data_service import create_data_manager
-
-# 基础使用
-manager = create_data_manager("stocks.db")
-
-# 自定义配置
-manager = create_data_manager(
-    database_path="stocks.db",
-    max_retries=5,
-    base_delay=30
-)
-
-# 智能下载
-result = manager.download_stock_data("AAPL")
-results = {s: manager.download_stock_data(s) for s in ['AAPL','GOOGL','MSFT']}
+from data_service import DataService, create_storage
+service = DataService(create_storage('sqlite', db_path="stocks.db"))
+res1 = service.download_and_store_stock_data("AAPL")
+resn = service.batch_download_and_store(['AAPL','GOOGL','MSFT'], include_financial=False)
 ```
 
-（不再提供 `create_simple_downloader` API）
+（已移除 `create_simple_downloader` 与 `create_data_manager` 便捷入口）
 
 ### 🔧 高级用法
 
@@ -350,39 +338,36 @@ service = DataService(create_storage('sqlite', db_path="stocks.db"))
 
 ### ⭐ 推荐使用模式
 
-1. **🎯 首选便捷API**: 
+1. **🎯 首选统一入口**: 
    ```python
    # 推荐：简单直接
-   manager = create_data_manager("stocks.db")
+   service = DataService(create_storage('sqlite', db_path="stocks.db"))
    
-   # 而不是：手动组装
+   # 而不是：手动组装 Hybrid
    storage = create_storage('sqlite', db_path="stocks.db")
    manager = HybridDataDownloader(storage)
    ```
 
-2. **📦 批量操作优先**: 
+2. **📦 批量操作优先（服务层）**: 
    ```python
    # 推荐：批量下载
-   results = {s: manager.download_stock_data(s) for s in ['AAPL','GOOGL','MSFT']}
+   results = service.batch_download_and_store(['AAPL','GOOGL','MSFT'], include_financial=False)
    
    # 避免：逐个下载
    for symbol in symbols:
-       manager.download_stock_data(symbol)
+       service.download_and_store_stock_data(symbol)
    ```
 
 3. **🔧 配置传递**: 
-   ```python
-   # 推荐：通过create_data_manager传递配置
-   manager = create_data_manager("stocks.db", max_retries=5, base_delay=60)
-   ```
+   - 如需自定义下载重试/延迟，建议直接在下载器层配置后注入到 DataService/Hybrid（当前简化实现默认配置已满足日常使用）。
 
 ### 🛡️ 错误处理
 
 ```python
 # 始终检查结果
-result = manager.download_stock_data("AAPL")
+result = service.download_and_store_stock_data("AAPL")
 if result.get('success'):
-    print(f"成功，策略: {result['used_strategy']}")
+    print(f"成功，策略: {result.get('used_strategy')}")
 else:
     print(f"失败: {result.get('error')}")
 ```
@@ -392,7 +377,7 @@ else:
 1. **启用增量下载**: 减少数据传输量
 2. **合理设置重试参数**: 避免过度重试
 3. **使用策略优先级**: 让系统选择最优数据源
-4. **及时关闭资源**: `manager.close()` 释放数据库连接
+4. **及时关闭资源**: `service.close()` 释放数据库连接
 
 ### 🔍 监控数据质量
 
@@ -408,15 +393,20 @@ if result.get('comprehensive_data'):
 
 ## 📈 输出和存储
 
-### 数据库表结构
-- `stock_prices`: 股票价格数据
-- `financial_data`: 财务数据  
-- `comprehensive_data`: 综合数据
-- `download_logs`: 下载日志
-- `data_quality`: 数据质量记录
+### 数据库表结构（简化方案）
+- `stock_prices`：价格数据（逐日规范化）
+- `price_bars`：价格视图（等同 `stock_prices`，便于统一命名）
+- `financial_statements`：财报（每期一行，data 为 JSON）
+- `download_logs`：下载与质量日志（details JSON 可存质量评估）
+- `symbols`：基本信息
+
+### 质量评估存储
+数据质量（DataQuality）作为下载日志的一部分写入：
+- `download_logs.download_type = 'quality'`
+- `details` JSON 存储质量字段（completeness、quality_grade、issues 等）
 
 ### 数据格式
-所有数据都以标准化的 DataClass 格式存储，确保:
+所有数据都以标准化的 DataClass 读写，确保:
 - 类型安全
 - 数据一致性
 - 易于序列化和反序列化
@@ -425,10 +415,10 @@ if result.get('comprehensive_data'):
 ## 🆕 最新更新
 
 ### v2.0 重大更新（校正）
-- ✨ **新增便捷API**: `create_data_manager()`
-- 🏗️ **重构包结构**: 更清晰的模块组织（本文档已对齐实际文件名）
-- 🎯 **推荐使用方式**: 一行代码创建完整数据管理器
-- 📋 **完整导出**: `__all__` 列表包含所有可用API
+- 🗑️ 移除便捷API: `create_data_manager()`，统一通过 `DataService + create_storage`
+- 🏗️ 重构包结构：更清晰的模块组织（本文档已对齐实际文件名）
+- 🎯 推荐使用方式：以 DataService 为统一入口
+- 📋 完整导出：`__all__` 列表包含主要组件与模型
 
 ---
 
