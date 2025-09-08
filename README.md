@@ -52,8 +52,13 @@
 git clone <repository-url>
 cd Stock
 
-# 安装依赖（推荐固定版本）
+# 安装依赖（SQLite 默认）
 pip install -r requirements.txt
+
+# （可选）PostgreSQL 支持
+# 默认未包含 PG 依赖，如需使用 PostgreSQL，可单独安装：
+#   pip install psycopg2-binary
+# 并确保系统已安装 pg_config（macOS 可通过 Homebrew 安装 postgresql）。
 ```
 
 ## 🎮 使用方法
@@ -63,7 +68,7 @@ pip install -r requirements.txt
 **直接运行模块（源码）:**
 ```bash
 # 综合分析（示例，可作为样例运行）
-python -m Stock.analysis_service.comprehensive_analyzer
+python -m Stock.analysis_service.analysis_service
 
 # 数据管理器（下载/初始化/更新）- 示例：下载两只股票
 python tools/data_manager.py download -s AAPL MSFT
@@ -71,9 +76,9 @@ python tools/data_manager.py download -s AAPL MSFT
 
 **编程方式使用:**
 ```python
-from Stock.analysis_service import ComprehensiveStockAnalyzer
+from Stock.analysis_service import AnalysisService
 
-analyzer = ComprehensiveStockAnalyzer()
+analyzer = AnalysisService()
 symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
 results = analyzer.run_comprehensive_analysis(symbols, period="1y")
 ```
@@ -131,8 +136,8 @@ results = {s: manager.download_stock_data(s) for s in symbols}
 ### 🎯 高级自定义
 
 ```python
-from analysis_service import ComprehensiveStockAnalyzer
-analyzer = ComprehensiveStockAnalyzer(db_path='database/stock_data.db', enabled_operators=['ma','rsi','drop_alert','fin_ratios','fin_health'])
+from analysis_service import AnalysisService
+analyzer = AnalysisService(db_path='database/stock_data.db', enabled_operators=['ma','rsi','drop_alert','fin_ratios','fin_health'])
 results = analyzer.run_comprehensive_analysis(["AAPL","NVDA"], period="6mo")
 for symbol, data in results.items():
     print(symbol, data['summary'])
@@ -140,6 +145,11 @@ for symbol, data in results.items():
 
 ## 📁 输出
 仅文本日志与结构化结果（dict/JSON）。无图表输出。
+
+### 数据分析工具（本地）
+- 执行可插拔算子并输出 JSON 到 `result/`：
+  - `python tools/data_analyzer.py -s AAPL MSFT --period 6mo --db-path database/stock_data.db`
+  - 或从文件读取：`python tools/data_analyzer.py --symbols-file symbols.txt --start-date 2022-01-01`
 
 ## 📖 指标说明
 
@@ -167,7 +177,7 @@ for symbol, data in results.items():
 Stock/
 ├── 📊 analysis_service/         # 核心分析模块包
 │   ├── __init__.py                     # 包初始化
-│   ├── comprehensive_analyzer.py       # 🔥 综合分析系统（封装流水线调用）
+│   ├── analysis_service.py             # 🔥 综合分析系统（封装流水线调用）
 │   ├── app/
 │   │   └── runner.py                  # 流水线运行入口（构建算子/执行/汇总）
 │   ├── data/

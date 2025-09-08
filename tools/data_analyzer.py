@@ -11,7 +11,7 @@
       --operators ma,rsi,drop_alert,fin_ratios,fin_health
 
   python tools/data_analyzer.py --symbols-file symbols.txt --start-date 2022-01-01 \
-      --db-path database/stock_data.db --output analysis_result/output.json
+      --db-path database/stock_data.db --output result/output.json
 """
 
 from __future__ import annotations
@@ -23,8 +23,16 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path when running as a script
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from utils.logging_utils import setup_logging
-from analysis_service.app.runner import run_analysis_for_symbols, build_operators
+from analysis_service import AnalysisService
 from analysis_service.config import get_config
 
 
@@ -92,9 +100,9 @@ def _resolve_output_path(path: Optional[str]) -> str:
     if path:
         out = path
     else:
-        os.makedirs('analysis_result', exist_ok=True)
+        os.makedirs('result', exist_ok=True)
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        out = os.path.join('analysis_result', f'analysis_{ts}.json')
+        out = os.path.join('result', f'analysis_{ts}.json')
     os.makedirs(os.path.dirname(out), exist_ok=True)
     return out
 
@@ -102,7 +110,7 @@ def _resolve_output_path(path: Optional[str]) -> str:
 def cmd_analyze(args: argparse.Namespace) -> int:
     setup_logging('INFO' if args.verbose else 'WARNING')
     symbols = _load_symbols(args)
-    start = args.start_date or _period_to_start(args.period)
+    start = args.start_date
     end = args.end_date
 
     enabled_ops = None
@@ -111,13 +119,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         logger.info(f"启用算子: {enabled_ops}")
 
     logger.info(f"开始分析 {len(symbols)} 个股票，db={args.db_path}，范围 {start or 'auto'} ~ {end or 'latest'}")
-    results = run_analysis_for_symbols(
-        symbols=symbols,
-        db_path=args.db_path,
-        start=start,
-        end=end,
-        enabled_operators=enabled_ops,
-    )
+    analyzer = AnalysisService(db_path=args.db_path, enabled_operators=enabled_ops)
+    results = analyzer.run_analysis(symbols, period=args.period, start=start, end=end)
 
     out_path = _resolve_output_path(args.output)
     with open(out_path, 'w', encoding='utf-8') as f:

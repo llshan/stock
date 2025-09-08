@@ -21,7 +21,7 @@ results = service.batch_download_and_store(symbols, include_financial=False)
 ```
 
 ### 传统使用方式
-（已简化，建议直接使用上面的便捷函数或 HybridDataDownloader）
+（已简化，建议直接使用上面的便捷函数；价格数据的自动策略已并入 DataService）
 
 ## 📁 模块结构
 
@@ -36,7 +36,7 @@ data_service/
 │   ├── base.py                      # 🏗️ 下载器抽象基类
 │   ├── yfinance.py                  # 📈 Yahoo Finance 数据下载器  
 │   ├── stooq.py                     # 📊 Stooq 数据下载器
-│   └── hybrid.py                    # 🔄 混合数据下载器（HybridDataDownloader）
+│   └── （已合并）                    # 下载策略已并入 DataService
 └── README.md                        # 📄 本文件
 ```
 
@@ -81,10 +81,10 @@ def _is_api_error_retryable(error)     # 判断错误是否可重试
 - 数据完整性验证
 - 格式标准化处理
 
-### 🔄 `downloaders/hybrid.py` - 混合数据下载器（简化）
-**按是否新股与更新时间选择数据源，直接入库**
-- `HybridDataDownloader`: 新股走 Stooq 全量；老股>100天未更新用 Stooq，否则用 yfinance 增量
-- 内置简单策略与日志，便捷落地
+### 🔄 自动策略下载
+**DataService 内置：按是否新股与更新时间选择数据源，并直接入库**
+- 新股：Stooq 全量
+- 老股：距离上次更新>阈值（默认100天）用 yfinance，否则用 Stooq 补全
 
 ### 💾 `database.py` - 数据持久化层
 **统一的数据库访问接口**
@@ -138,7 +138,7 @@ def get_existing_symbols()                    # 获取已有股票列表
 graph TD
     A[DataService 核心服务] --> B[YFinanceDataDownloader]
     A --> C[StooqDataDownloader] 
-    A --> D[HybridDataDownloader]
+    A --> D[自动策略（内置）]
     A --> E[StockDatabase]
     
     B --> F[BaseDownloader]
@@ -171,25 +171,19 @@ resn = service.batch_download_and_store(['AAPL','GOOGL','MSFT'], include_financi
 
 ### 🔧 高级用法
 
-#### 1. 数据管理器直接使用
+#### 1. 自动策略下载（DataService）
 ```python
-from data_service import HybridDataDownloader, create_storage
-
-# 手动创建和配置
+from data_service import DataService, create_storage
 storage = create_storage('sqlite', db_path="stocks.db")
-manager = HybridDataDownloader(storage, max_retries=5)
-
-# 下载单个股票（内部自动选择数据源）
-result = manager.download_stock_data('AAPL')
-
-# 简化版数据管理器当前不支持策略插拔配置
+service = DataService(storage)
+result = service.download_and_store_stock_data('AAPL')
 ```
 
 #### 2. 数据服务直接使用
 ```python
 from data_service import DataService, create_storage
 
-# 创建服务组件（价格数据统一走 Hybrid）
+# 创建服务组件（价格数据自动选择来源）
 storage = create_storage('sqlite', db_path="stocks.db")
 service = DataService(storage)
 

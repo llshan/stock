@@ -6,11 +6,9 @@
 from .base import BaseDownloader
 from .yfinance import YFinanceDataDownloader
 from .stooq import StooqDataDownloader
-from .hybrid import HybridDataDownloader
 
 __all__ = [
     'BaseDownloader',
     'YFinanceDataDownloader', 
-    'StooqDataDownloader',
-    'HybridDataDownloader'
+    'StooqDataDownloader'
 ]

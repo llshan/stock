@@ -45,7 +45,8 @@ class SQLiteStorage(BaseStorage):
             self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
             self.connection.execute("PRAGMA foreign_keys = ON")
             self.cursor = self.connection.cursor()
-            self._create_tables()
+            if not self._schema_exists():
+                self._create_tables()
             self.logger.info(f"✅ SQLite 数据库连接成功: {self.db_path}")
         except Exception as e:
             raise StorageError(f"SQLite 连接失败: {e}", "connect")
@@ -57,8 +58,8 @@ class SQLiteStorage(BaseStorage):
             self.logger.info("📴 SQLite 数据库连接已关闭")
     
     def _create_tables(self):
-        """创建数据库表结构"""
-        self.logger.info("📊 创建数据库表结构...")
+        """创建或修复数据库表结构（仅在缺失时执行）"""
+        self.logger.info("📊 创建/修复数据库表结构...")
         
         # 股票基本信息表
         stocks_table = """
@@ -160,7 +161,23 @@ class SQLiteStorage(BaseStorage):
             pass
 
         self.connection.commit()
-        self.logger.info("✅ 数据库表结构创建完成")
+        self.logger.info("✅ 数据库表结构就绪")
+
+    def _schema_exists(self) -> bool:
+        """检查核心表是否已存在，全部存在则认为已初始化"""
+        try:
+            required = [
+                'stocks',
+                'stock_prices',
+                'financial_statements',
+                'download_logs',
+            ]
+            placeholders = ",".join(["?"] * len(required))
+            sql = f"SELECT name FROM sqlite_master WHERE type='table' AND name IN ({placeholders})"
+            rows = self.cursor.execute(sql, required).fetchall()
+            return len(rows) == len(required)
+        except Exception:
+            return False
     
     def store_stock_data(self, symbol: str, stock_data: Union[StockData, Dict]) -> bool:
         """存储股票数据"""
@@ -373,6 +390,16 @@ class SQLiteStorage(BaseStorage):
             return result[0] if result and result[0] else None
         except Exception as e:
             self.logger.error(f"❌ 获取最后更新日期失败 {symbol}: {e}")
+            return None
+
+    def get_last_financial_period(self, symbol: str) -> Optional[str]:
+        """获取该股票财务报表的最近期间（period）"""
+        try:
+            sql = "SELECT MAX(period) FROM financial_statements WHERE symbol = ?"
+            result = self.cursor.execute(sql, (symbol,)).fetchone()
+            return result[0] if result and result[0] else None
+        except Exception as e:
+            self.logger.error(f"❌ 获取最近财务期间失败 {symbol}: {e}")
             return None
     
     def _store_basic_info(self, symbol: str, basic_info: Union[BasicInfo, Dict]):

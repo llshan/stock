@@ -4,7 +4,7 @@
 """
 
 # 综合分析器（基于流水线）
-from .comprehensive_analyzer import ComprehensiveStockAnalyzer
+from .analysis_service import AnalysisService
 
 # 新的DB仓储 + operator 流水线
 from .data.price_repository import PriceDataRepository, DatabasePriceDataRepository, TimeRange
@@ -17,7 +17,7 @@ from .operators.fin_ratios import FinancialRatioOperator
 from .operators.fin_health import FinancialHealthOperator
 from .pipeline.engine import PipelineEngine
 from .pipeline.context import AnalysisContext
-from .app.runner import run_analysis_for_symbols, build_operators
+from .pipeline.runner import run_analysis_for_symbols, build_operators
 
 # 配置管理
 from .config import (
@@ -36,7 +36,7 @@ from .config import (
 
 __all__ = [
     # 综合分析器
-    'ComprehensiveStockAnalyzer',
+    'AnalysisService',
     
     # 数据仓储 + 流水线
     'PriceDataRepository',
@@ -83,7 +83,7 @@ def get_module_info():
         'description': __description__,
         'modules': {
             'stock_analyzer': '技术分析模块 - RSI, 移动平均, 布林带等指标',
-            'comprehensive_analyzer': '综合分析模块 - 基于数据库与可插拔Operators',
+            'analysis_service': '综合分析模块 - 基于数据库与可插拔Operators',
             'data': '数据仓储模块（行情/财务）',
             'operators': '可插拔分析算子（技术/财务/风险）',
             'pipeline': '流水线引擎与上下文',
@@ -97,5 +97,3 @@ def get_module_info():
             '丰富的图表生成'
         ]
     }
-
-# 建议直接使用 run_analysis_for_symbols 或 ComprehensiveStockAnalyzer

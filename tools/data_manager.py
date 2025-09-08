@@ -13,6 +13,14 @@ from typing import List
 
 import pandas as pd
 
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path when running as a script
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from utils.logging_utils import setup_logging
 from data_service import DataService, create_storage
 from data_service.config import get_default_watchlist
@@ -35,9 +43,9 @@ def cmd_download(args: argparse.Namespace) -> int:
         logger.error("请使用 -s/--symbols 指定股票，或加上 --use-default-watchlist")
         return 2
 
-    logger.info(f"开始下载 {len(symbols)} 个股票，起始: {args.start_date or '自动增量'}（混合：新股Stooq全量，老股>100天yfinance，否则Stooq）")
+    logger.info(f"开始下载 {len(symbols)} 个股票，起始: {args.start_date or '自动增量'}（策略：新股Stooq全量，老股>阈值天数用yfinance，否则Stooq）")
 
-    # 逐只下载并入库（DataService 内部统一走 Hybrid）
+    # 逐只下载并入库（DataService 内部自动选择来源）
     results = {}
     strategy_usage = {}
     ok = 0

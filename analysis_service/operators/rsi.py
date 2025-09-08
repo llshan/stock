@@ -24,7 +24,9 @@ class RSIOperator(Operator):
         self.period = period
 
     def run(self, ctx: "AnalysisContext") -> Dict[str, Any]:
-        data: pd.DataFrame = ctx.extras.get('ma_data') or ctx.data.copy()
+        data: pd.DataFrame = ctx.extras.get('ma_data')
+        if data is None:
+            data = ctx.data.copy()
         period = self.period or getattr(ctx.config.technical, 'rsi_period', 14)
         if 'Close' not in data.columns or len(data) < period + 1:
             return {'error': 'insufficient_data'}

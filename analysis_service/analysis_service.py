@@ -13,8 +13,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from .config import get_config
-from .app.runner import run_analysis_for_symbols
+from .config import get_config, Config
+from .pipeline.runner import run_analysis_for_symbols
 
 
 logger = logging.getLogger(__name__)
@@ -38,36 +38,35 @@ def _period_to_start(period: str) -> Optional[str]:
     return get_config().data.default_start_date
 
 
-class ComprehensiveStockAnalyzer:
-    """综合分析器，使用统一流水线实现。"""
+class AnalysisService:
+    """综合分析服务，使用统一流水线实现。"""
 
-    def __init__(self, db_path: str = 'database/stock_data.db', enabled_operators: Optional[List[str]] = None):
+    def __init__(self, db_path: str = 'database/stock_data.db', enabled_operators: Optional[List[str]] = None, config: Optional[Config] = None):
         self.db_path = db_path
         self.enabled_operators = enabled_operators or ["ma", "rsi", "drop_alert"]
+        self.config = config or get_config()
         self.logger = logging.getLogger(__name__)
 
-    def run_comprehensive_analysis(self, symbols: List[str], period: str = "1y") -> Dict[str, Dict]:
-        start = _period_to_start(period)
-        self.logger.info(f"综合分析（DB only）: symbols={len(symbols)}, start={start}")
+    def run_analysis(self, symbols: List[str], period: str = "1y", start: Optional[str] = None, end: Optional[str] = None) -> Dict[str, Dict]:
+        start_final = start or _period_to_start(period) or self.config.data.default_start_date
+        self.logger.info(f"综合分析（DB only）: symbols={len(symbols)}, start={start_final}, end={end or 'latest'}")
         pipe_results = run_analysis_for_symbols(
             symbols=symbols,
             db_path=self.db_path,
-            start=start,
-            end=None,
+            start=start_final,
+            end=end,
             enabled_operators=self.enabled_operators,
+            config=self.config,
         )
         # 返回新的流水线原生结构，不做额外包装
         return pipe_results
-
-    def comprehensive_analyze(self, symbol: str, period: str = "1y") -> Dict:
-        return self.run_comprehensive_analysis([symbol], period).get(symbol, {})
 
 
 if __name__ == "__main__":
     from utils.logging_utils import setup_logging
     setup_logging()
     syms = ["AAPL", "GOOGL", "LULU"]
-    analyzer = ComprehensiveStockAnalyzer()
-    out = analyzer.run_comprehensive_analysis(syms, period="6mo")
+    analyzer = AnalysisService()
+    out = analyzer.run_analysis(syms, period="6mo")
     for s, res in out.items():
         logger.info(f"{s}: {res.get('summary')}")

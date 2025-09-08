@@ -22,6 +22,10 @@ class DownloaderConfig:
     base_delay: int = 30
     timeout: int = 120
     rate_limit_delay: float = 1.0
+    # 混合策略阈值：距离上次更新超过多少天使用 yfinance，否则使用 stooq
+    hybrid_threshold_days: int = 100
+    # 财务刷新阈值（天）：距离最近财报期超过该天数则重新抓取财务
+    financial_refresh_days: int = 90
 
 
 @dataclass

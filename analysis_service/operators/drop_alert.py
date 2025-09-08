@@ -25,7 +25,11 @@ class DropAlertOperator(Operator):
         self.threshold = threshold_percent
 
     def run(self, ctx: "AnalysisContext") -> Dict[str, Any]:
-        data: pd.DataFrame = ctx.extras.get('rsi_data') or ctx.extras.get('ma_data') or ctx.data
+        data: pd.DataFrame = ctx.extras.get('rsi_data')
+        if data is None:
+            data = ctx.extras.get('ma_data')
+        if data is None:
+            data = ctx.data
         if len(data) < self.days + 1 or 'Close' not in data.columns:
             return {'error': 'insufficient_data'}
         current_price = float(data['Close'].iloc[-1])

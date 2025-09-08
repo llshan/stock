@@ -7,12 +7,11 @@
 from .data_service import DataService
 from .storage import create_storage, SQLiteStorage
 
-# 数据下载器 - 推荐使用 HybridDataDownloader
+# 数据下载器（底层）
 from .downloaders import (
     BaseDownloader,
     YFinanceDataDownloader,
-    StooqDataDownloader, 
-    HybridDataDownloader
+    StooqDataDownloader
 )
 
 # 数据模型
@@ -31,15 +30,12 @@ from .models import (
 )
 
 __all__ = [
-    # 🎯 推荐使用 - 主要入口点
-    'HybridDataDownloader',
-    
     # 核心组件
     'DataService',
     'create_storage',
     'SQLiteStorage',
     
-    # 其他下载器
+    # 下载器（底层）
     'YFinanceDataDownloader',
     'StooqDataDownloader',
     'BaseDownloader',

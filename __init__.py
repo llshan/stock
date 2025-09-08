@@ -12,7 +12,6 @@ from . import analysis_service
 from .data_service import (
     YFinanceDataDownloader,
     StooqDataDownloader,
-    HybridDataDownloader,
     StockDatabase,
     DataService
 )
@@ -20,7 +19,7 @@ from .data_service import (
 from .analysis_service import (
     StockAnalyzer,
     FinancialAnalyzer,
-    ComprehensiveStockAnalyzer
+    AnalysisService
 )
 
 __version__ = "1.0.0"
@@ -31,14 +30,13 @@ __all__ = [
     # 数据服务
     'YFinanceDataDownloader',
     'StooqDataDownloader',
-    'HybridDataDownloader',
     'StockDatabase',
     'DataService',
     
     # 分析器
     'StockAnalyzer',
     'FinancialAnalyzer', 
-    'ComprehensiveStockAnalyzer',
+    'AnalysisService',
     
     # 模块
     'data_service',
