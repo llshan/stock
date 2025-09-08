@@ -115,21 +115,8 @@ class SQLiteStorage(BaseStorage):
             status TEXT,
             data_points INTEGER,
             error_message TEXT,
+            details TEXT,
             download_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-        
-        # 数据质量评估表
-        data_quality_table = """
-        CREATE TABLE IF NOT EXISTS data_quality (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT,
-            stock_data_available BOOLEAN,
-            financial_data_available BOOLEAN,
-            data_completeness REAL,
-            quality_grade TEXT,
-            issues TEXT,
-            assessment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
         
@@ -137,8 +124,7 @@ class SQLiteStorage(BaseStorage):
             stocks_table,
             stock_prices_table, 
             financial_statements_table,
-            download_logs_table,
-            data_quality_table
+            download_logs_table
         ]
         
         for table in tables:
@@ -154,6 +140,25 @@ class SQLiteStorage(BaseStorage):
         for index in indexes:
             self.cursor.execute(index)
         
+        # 迁移：如旧表缺少 details 列，补充之
+        try:
+            self.cursor.execute("PRAGMA table_info(download_logs)")
+            cols = [row[1] for row in self.cursor.fetchall()]
+            if 'details' not in cols:
+                self.cursor.execute("ALTER TABLE download_logs ADD COLUMN details TEXT")
+        except Exception:
+            pass
+
+        # 视图：提供与规范化命名一致的价格视图（兼容查询）
+        try:
+            self.cursor.execute(
+                "CREATE VIEW IF NOT EXISTS price_bars AS "
+                "SELECT symbol, date, open, high, low, close, adj_close, volume, created_at "
+                "FROM stock_prices"
+            )
+        except Exception:
+            pass
+
         self.connection.commit()
         self.logger.info("✅ 数据库表结构创建完成")
     
@@ -161,10 +166,13 @@ class SQLiteStorage(BaseStorage):
         """存储股票数据"""
         try:
             if isinstance(stock_data, StockData):
-                # 存储基本信息（如果有的话）
+                # 确保股票记录存在（必须先于价格数据）
                 basic_info = getattr(stock_data, 'basic_info', None)
                 if basic_info:
                     self._store_basic_info(symbol, basic_info)
+                else:
+                    # 如果没有基本信息，创建一个空的记录以满足外键约束
+                    self._ensure_stock_exists(symbol)
                 
                 # 存储价格数据
                 self._store_price_data(symbol, stock_data.price_data)
@@ -173,6 +181,9 @@ class SQLiteStorage(BaseStorage):
                 # 从字典存储
                 if 'basic_info' in stock_data:
                     self._store_basic_info(symbol, stock_data['basic_info'])
+                else:
+                    # 确保股票记录存在
+                    self._ensure_stock_exists(symbol)
                 
                 if 'price_data' in stock_data:
                     price_data = PriceData.from_dict(stock_data['price_data'])
@@ -223,35 +234,29 @@ class SQLiteStorage(BaseStorage):
             return False
     
     def store_data_quality(self, symbol: str, quality_data: Union[DataQuality, Dict]) -> bool:
-        """存储数据质量评估"""
+        """将数据质量评估作为下载日志的一部分进行记录（details JSON）。"""
         try:
             if isinstance(quality_data, DataQuality):
-                data = quality_data.to_dict()
+                details = quality_data.to_dict()
             else:
-                data = quality_data
-            
-            sql = """
-            INSERT OR REPLACE INTO data_quality 
-            (symbol, stock_data_available, financial_data_available, data_completeness, 
-             quality_grade, issues, assessment_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """
-            
-            self.cursor.execute(sql, (
-                symbol,
-                data['stock_data_available'],
-                data['financial_data_available'],
-                data['data_completeness'],
-                data['quality_grade'],
-                json.dumps(data.get('issues', [])),
-                datetime.now().isoformat()
-            ))
-            
-            self.connection.commit()
+                details = quality_data
+
+            self._log_download(
+                symbol=symbol,
+                download_type="quality",
+                status="success",
+                data_points=0,
+                error_message=None,
+                details=details,
+            )
             return True
-            
         except Exception as e:
-            self.logger.error(f"❌ 存储数据质量评估失败 {symbol}: {e}")
+            self.logger.error(f"❌ 记录数据质量评估失败 {symbol}: {e}")
+            # 降级为写失败日志
+            try:
+                self._log_download(symbol, "quality", "failed", 0, str(e))
+            except Exception:
+                pass
             return False
     
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> Optional[StockData]:
@@ -395,6 +400,19 @@ class SQLiteStorage(BaseStorage):
         ))
         self.connection.commit()
     
+    def _ensure_stock_exists(self, symbol: str):
+        """确保股票记录存在（用空值创建）"""
+        sql = """
+        INSERT OR IGNORE INTO stocks 
+        (symbol, company_name, sector, industry, market_cap, employees, description, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        
+        self.cursor.execute(sql, (
+            symbol, '', '', '', 0, 0, '', datetime.now().isoformat()
+        ))
+        self.connection.commit()
+    
     def _store_price_data(self, symbol: str, price_data: PriceData):
         """存储价格数据"""
         for i, date in enumerate(price_data.dates):
@@ -447,15 +465,15 @@ class SQLiteStorage(BaseStorage):
         
         self.connection.commit()
     
-    def _log_download(self, symbol: str, download_type: str, status: str, data_points: int = 0, error_message: str = None):
+    def _log_download(self, symbol: str, download_type: str, status: str, data_points: int = 0, error_message: str = None, details: Optional[Dict[str, Any]] = None):
         """记录下载日志"""
         sql = """
         INSERT INTO download_logs 
-        (symbol, download_type, status, data_points, error_message)
-        VALUES (?, ?, ?, ?, ?)
+        (symbol, download_type, status, data_points, error_message, details)
+        VALUES (?, ?, ?, ?, ?, ?)
         """
-        
+        details_json = json.dumps(details, ensure_ascii=False) if details else None
         self.cursor.execute(sql, (
-            symbol, download_type, status, data_points, error_message
+            symbol, download_type, status, data_points, error_message, details_json
         ))
         self.connection.commit()

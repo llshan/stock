@@ -107,15 +107,24 @@ def cmd_query(args: argparse.Namespace) -> int:
     last = max(df['date']) if not df.empty else None
     logger.info(f"{args.symbol.upper()}: 共 {len(df)} 行，范围 {first} ~ {last}")
 
-    # 打印前后各 N 行
-    n = min(args.limit, len(df))
+    # 设置 pandas 显示选项以优化对齐
     try:
         pd.set_option('display.width', 120)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.precision', 4)
+        pd.set_option('display.float_format', '{:.4f}'.format)
     except Exception:
         pass
-    print("\n前几行:\n", df.head(n))
+    
+    # 打印前后各 N 行
+    n = min(args.limit, len(df))
+    
+    print("\n前几行:")
+    print(df.head(n).to_string(index=True, justify='right', col_space=10))
+    
     if len(df) > n:
-        print("\n后几行:\n", df.tail(n))
+        print("\n后几行:")
+        print(df.tail(n).to_string(index=True, justify='right', col_space=10))
 
     storage.close()
     return 0

@@ -78,6 +78,8 @@ class DataService:
             结果字典（由 Hybrid 返回，并已入库）
         """
         try:
+            # 确保股票记录存在（必须先于价格数据）
+            self._ensure_stock_record(symbol)
             return self.hybrid.download_stock_data(symbol, start_date or "2000-01-01")
         except Exception as e:
             error_msg = f"通过数据服务(混合)下载 {symbol} 数据失败: {str(e)}"
@@ -115,6 +117,8 @@ class DataService:
         """
         try:
             self.logger.info(f"📈 开始下载并存储 {symbol} 股票数据（Hybrid）")
+            # 确保股票记录存在（必须先于价格数据）
+            self._ensure_stock_record(symbol)
             return self.hybrid.download_stock_data(symbol, start_date or "2000-01-01")
         except Exception as e:
             error_msg = f"下载并存储 {symbol} 数据失败: {str(e)}"
@@ -134,6 +138,8 @@ class DataService:
         """
         try:
             # 价格数据：统一走 Hybrid（内部已入库）
+            # 为确保价格入库顺序正确，先确保股票记录存在
+            self._ensure_stock_record(symbol)
             stock_data = self.download_stock_data(symbol, start_date)
             # 财务数据：走 yfinance
             financial_data = self.download_financial_data(symbol, use_retry=True)
@@ -259,3 +265,24 @@ class DataService:
         """关闭数据服务（关闭数据库连接）"""
         if self.storage:
             self.storage.close()
+
+    # 内部工具
+    def _ensure_stock_record(self, symbol: str):
+        """确保股票记录存在，直接创建空记录以满足外键约束。
+        
+        仅为价格数据存储创建必要的stocks表记录，不强制下载财务数据。
+        """
+        try:
+            existing = set(self.get_existing_symbols())
+            if symbol in existing:
+                return
+        except Exception:
+            # 如果无法读取现有列表，继续创建记录
+            pass
+
+        # 直接创建空的股票记录，避免不必要的财务数据下载
+        try:
+            self.storage._ensure_stock_exists(symbol)
+            self.logger.info(f"🪪 已创建空股票记录: {symbol}")
+        except Exception as e:
+            self.logger.error(f"❌ 创建股票记录失败 {symbol}: {e}")
