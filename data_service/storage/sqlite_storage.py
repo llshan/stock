@@ -5,6 +5,7 @@ SQLite 存储实现
 """
 
 import sqlite3
+import os
 import pandas as pd
 import json
 from datetime import datetime
@@ -12,26 +13,16 @@ from typing import Dict, List, Optional, Any, Union
 import logging
 
 from .base import BaseStorage, StorageError
-try:
-    from ..models import (
-        StockData, FinancialData, ComprehensiveData, PriceData, 
-        SummaryStats, BasicInfo, FinancialStatement, DataQuality
-    )
-except ImportError:
-    # Fallback for direct execution
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-    from models import (
-        StockData, FinancialData, ComprehensiveData, PriceData, 
-        SummaryStats, BasicInfo, FinancialStatement, DataQuality
-    )
+from ..models import (
+    StockData, FinancialData, ComprehensiveData, PriceData, 
+    SummaryStats, BasicInfo, FinancialStatement, DataQuality
+)
 
 
 class SQLiteStorage(BaseStorage):
     """SQLite 存储实现"""
     
-    def __init__(self, db_path: str = "stock_data.db"):
+    def __init__(self, db_path: str = "database/stock_data.db"):
         """
         初始化 SQLite 存储
         
@@ -47,6 +38,10 @@ class SQLiteStorage(BaseStorage):
     def connect(self):
         """建立数据库连接"""
         try:
+            # 确保数据库目录存在
+            dirn = os.path.dirname(self.db_path)
+            if dirn:
+                os.makedirs(dirn, exist_ok=True)
             self.connection = sqlite3.connect(self.db_path, check_same_thread=False)
             self.connection.execute("PRAGMA foreign_keys = ON")
             self.cursor = self.connection.cursor()

@@ -70,8 +70,8 @@ class YFinanceDataDownloader(BaseDownloader):
                         close=[], volume=[], adj_close=[]
                     ),
                     summary_stats=SummaryStats(
-                        min_price=0.0, max_price=0.0, avg_price=0.0,
-                        total_volume=0, avg_volume=0
+                        min_price=0.0, max_price=0.0, mean_price=0.0,
+                        std_price=0.0, total_volume=0
                     ),
                     downloaded_at=datetime.now().isoformat(),
                     incremental_update=True,
@@ -99,9 +99,9 @@ class YFinanceDataDownloader(BaseDownloader):
             summary_stats = SummaryStats(
                 min_price=float(hist_data['Close'].min()),
                 max_price=float(hist_data['Close'].max()),
-                avg_price=float(hist_data['Close'].mean()),
-                total_volume=int(hist_data['Volume'].sum()),
-                avg_volume=int(hist_data['Volume'].mean())
+                mean_price=float(hist_data['Close'].mean()),
+                std_price=float(hist_data['Close'].std()),
+                total_volume=int(hist_data['Volume'].sum())
             )
             
             stock_data = StockData(
@@ -282,56 +282,14 @@ class YFinanceDataDownloader(BaseDownloader):
         
         return comprehensive_data
     
-    def batch_download(self, symbols: List[str], start_date: str = None, incremental: bool = True, use_retry: bool = True) -> Dict[str, ComprehensiveData]:
-        """
-        批量下载多个股票的数据
-        
-        Args:
-            symbols: 股票代码列表
-            start_date: 开始日期
-            incremental: 是否进行增量下载
-            use_retry: 是否使用重试机制
-            
-        Returns:
-            所有股票数据的字典
-        """
-        results = {}
-        total = len(symbols)
-        
-        mode_text = "增量下载" if incremental else "全量下载"
-        retry_text = "（启用重试）" if use_retry else ""
-        self.logger.info(f"🎯 开始批量{mode_text} {total} 个股票的数据{retry_text}")
-        
-        for i, symbol in enumerate(symbols):
-            self.logger.info(f"进度: [{i+1}/{total}] 处理 {symbol}")
-            
-            try:
-                results[symbol] = self.download_comprehensive_data(symbol, start_date, incremental, use_retry)
-                
-                # 添加延迟避免API限制
-                if i < total - 1:  # 最后一个不需要延迟
-                    time.sleep(2)
-                    
-            except Exception as e:
-                self.logger.error(f"下载 {symbol} 时出错: {str(e)}")
-                results[symbol] = {'error': str(e)}
-        
-        self.logger.info(f"✅ 批量下载完成，成功: {len([r for r in results.values() if 'error' not in r])}/{total}")
-        return results
+    # 批量相关操作已移除：此下载器仅提供单只股票下载接口
     
     # 质量评估与评级逻辑统一在 quality.py 中
 
-def create_watchlist() -> List[str]:
-    """创建需要关注的股票清单"""
-    return [
-        "AAPL",   # 苹果
-        "GOOG",   # 谷歌
-        "LULU"    # Lululemon
-    ]
-
 if __name__ == "__main__":
     # 配置日志
-    from logging_utils import setup_logging
+    from utils.logging_utils import setup_logging
+    from ..config import get_default_watchlist
     setup_logging()
     
     logging.getLogger(__name__).info("🚀 股票数据下载器（使用DataService）")
@@ -342,8 +300,8 @@ if __name__ == "__main__":
     # 创建下载器
     downloader = YFinanceDataDownloader()
     
-    # 获取关注股票列表
-    watchlist = create_watchlist()
+    # 示例股票列表（演示用途，统一方法）
+    watchlist = get_default_watchlist()
     
     logging.getLogger(__name__).info(f"📊 将下载 {len(watchlist)} 个股票的数据:")
     for i, symbol in enumerate(watchlist, 1):
@@ -352,38 +310,14 @@ if __name__ == "__main__":
     logging.getLogger(__name__).info(f"⏰ 数据时间范围: {downloader.start_date} 至今")
     logging.getLogger(__name__).info("📈 包含: 股票价格数据 + 财务报表数据")
     
-    # 执行批量下载（仅下载，不存储）
-    results = downloader.batch_download(watchlist)
-    
-    # 显示下载结果摘要
-    successful = len([r for r in results.values() if not isinstance(r, dict) or 'error' not in r])
-    failed = len(results) - successful
-    
-    logging.getLogger(__name__).info("=" * 50)
-    logging.getLogger(__name__).info("📊 下载结果摘要:")
-    logging.getLogger(__name__).info(f"✅ 成功: {successful} 个股票")
-    logging.getLogger(__name__).info(f"❌ 失败: {failed} 个股票")
-    
-    if failed > 0:
-        logging.getLogger(__name__).info("❌ 失败的股票:")
-        for symbol, data in results.items():
-            if isinstance(data, dict) and 'error' in data:
-                logging.getLogger(__name__).info(f"   • {symbol}: {data['error']}")
-    
-    # 数据质量报告
-    logging.getLogger(__name__).info("📈 下载的数据统计:")
-    for symbol, data in results.items():
-        if hasattr(data, 'data_quality'):
-            logging.getLogger(__name__).info(f"   {symbol}: {data.data_quality.quality_grade}")
-        elif isinstance(data, ComprehensiveData):
-            logging.getLogger(__name__).info(f"   {symbol}: {data.data_quality.quality_grade}")
-        elif not isinstance(data, dict) or 'error' not in data:
-            logging.getLogger(__name__).info(f"   {symbol}: 数据下载完成")
-    
-    logging.getLogger(__name__).info("💡 要使用完整的数据管理功能（包括数据库存储），请参考:")
-    logging.getLogger(__name__).info("   from data_service import DataService, StockDatabase")
-    logging.getLogger(__name__).info("   data_service = DataService(StockDatabase('stocks.db'))")
-    logging.getLogger(__name__).info("   data_service.batch_download_and_store(symbols)")
+    # 逐个下载（演示单股接口）
+    results = {}
+    for i, sym in enumerate(watchlist, 1):
+        logging.getLogger(__name__).info(f"📥 [{i}/{len(watchlist)}] 下载 {sym} …")
+        data = downloader.download_comprehensive_data(sym)
+        results[sym] = data
+        time.sleep(1)
+    logging.getLogger(__name__).info("📊 已完成逐只下载示例。")
 
 
 def main():

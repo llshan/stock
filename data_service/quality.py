@@ -7,11 +7,7 @@
 from datetime import datetime
 from typing import Dict, Union
 
-try:
-    from .models import StockData, FinancialData, DataQuality
-except ImportError:
-    # Fallback for direct execution
-    from models import StockData, FinancialData, DataQuality
+from .models import StockData, FinancialData, DataQuality
 
 
 def _get_quality_grade(score: float) -> str:

@@ -7,14 +7,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Union
 import pandas as pd
-try:
-    from ..models import StockData, FinancialData, ComprehensiveData, DataQuality
-except ImportError:
-    # Fallback for direct execution
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-    from models import StockData, FinancialData, ComprehensiveData, DataQuality
+from ..models import StockData, FinancialData, ComprehensiveData, DataQuality
 
 
 class BaseStorage(ABC):

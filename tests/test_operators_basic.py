@@ -1,9 +1,9 @@
 import pandas as pd
 
-from analyzer.pipeline.context import AnalysisContext
-from analyzer.operators.ma import MovingAverageOperator
-from analyzer.operators.rsi import RSIOperator
-from analyzer.operators.drop_alert import DropAlertOperator
+from analysis_service.pipeline.context import AnalysisContext
+from analysis_service.operators.ma import MovingAverageOperator
+from analysis_service.operators.rsi import RSIOperator
+from analysis_service.operators.drop_alert import DropAlertOperator
 
 
 class DummyCfg:
@@ -51,4 +51,3 @@ def test_drop_alert_operator():
     ctx = AnalysisContext(symbol='TEST', data=df, config=DummyCfg())
     res = DropAlertOperator(days=1, threshold_percent=15.0).run(ctx)
     assert res.get('is_alert') is True
-

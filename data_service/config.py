@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 数据服务配置管理
-统一管理所有硬编码参数和配置项
+
+职责：
+- 统一管理下载器、数据库、批量处理、数据质量与日志等配置项
+- 从环境变量/字典加载配置，提供便捷的默认值
+
+说明：
+- 仅包含纯配置与序列化逻辑，不包含 I/O 与业务流程
 """
 
 import os
@@ -21,7 +27,7 @@ class DownloaderConfig:
 @dataclass
 class DatabaseConfig:
     """数据库配置"""
-    db_path: str = "stock_data.db"
+    db_path: str = "database/stock_data.db"
     db_type: str = "sqlite"
     connection_timeout: int = 30
     max_connections: int = 10
@@ -282,7 +288,7 @@ def get_config(config_name: str = "default") -> DataServiceConfig:
     return configs.get(config_name, DEFAULT_CONFIG)
 
 
-def create_config(db_path: str = "stock_data.db", **kwargs) -> DataServiceConfig:
+def create_config(db_path: str = "database/stock_data.db", **kwargs) -> DataServiceConfig:
     """
     创建自定义配置的便捷函数
     
@@ -299,3 +305,18 @@ def create_config(db_path: str = "stock_data.db", **kwargs) -> DataServiceConfig
     config = DataServiceConfig.from_env(db_path)
     config.update(**kwargs)
     return config
+
+
+# 默认关注列表（用于示例/演示）
+def get_default_watchlist() -> List[str]:
+    """获取默认关注股票列表（可通过环境变量 WATCHLIST 覆盖，逗号分隔）"""
+    env = os.getenv('WATCHLIST')
+    if env:
+        syms = [s.strip().upper() for s in env.split(',') if s.strip()]
+        if syms:
+            return syms
+    return [
+        'AAPL',  # Apple
+        'GOOG',  # Google
+        'LULU',  # Lululemon
+    ]

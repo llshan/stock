@@ -6,18 +6,18 @@ Stock Analysis Toolkit
 """
 
 from . import data_service
-from . import analyzer
+from . import analysis_service
 
 # 导入核心类
 from .data_service import (
     YFinanceDataDownloader,
     StooqDataDownloader,
-    DataManager,
+    HybridDataDownloader,
     StockDatabase,
     DataService
 )
 
-from .analyzer import (
+from .analysis_service import (
     StockAnalyzer,
     FinancialAnalyzer,
     ComprehensiveStockAnalyzer
@@ -31,7 +31,7 @@ __all__ = [
     # 数据服务
     'YFinanceDataDownloader',
     'StooqDataDownloader',
-    'DataManager',
+    'HybridDataDownloader',
     'StockDatabase',
     'DataService',
     
@@ -42,7 +42,7 @@ __all__ = [
     
     # 模块
     'data_service',
-    'analyzer'
+    'analysis_service'
 ]
 
 def get_version():
@@ -58,6 +58,6 @@ def get_info():
         'description': __description__,
         'modules': {
             'data_service': '数据下载和存储服务',
-            'analyzer': '股票分析和可视化工具'
+            'analysis_service': '股票分析模块（流水线 + 算子）'
         }
     }

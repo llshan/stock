@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-数据服务类
-协调下载器和数据库之间的操作，负责数据流程管理
+数据服务层（DataService）
+
+职责：
+- 协调下载器与存储层，提供统一的数据获取/存储入口
+- 封装增量下载、批量下载与数据质量评估流程
+
+说明：
+- 模块侧重于数据流转（下载→规范化→存储）
+- 依赖 storage 与 downloaders 子模块
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Union
-from .database import StockDatabase
+from typing import Dict, List, Optional, Union, Any
+from .storage import create_storage, SQLiteStorage
 from .downloaders.yfinance import YFinanceDataDownloader
-from .downloaders.stooq import StooqDataDownloader
+from .downloaders.hybrid import HybridDataDownloader
 from .models import (
     StockData, FinancialData, ComprehensiveData, DataQuality,
     PriceData, SummaryStats, BasicInfo
@@ -23,22 +30,21 @@ class DataService:
     负责协调下载器和数据库操作，提供统一的数据管理接口
     """
     
-    def __init__(self, database: StockDatabase, 
-                 stock_downloader: Optional[YFinanceDataDownloader] = None,
-                 stooq_downloader: Optional[StooqDataDownloader] = None):
+    def __init__(self, storage=None):
         """
         初始化数据服务
         
         Args:
-            database: 数据库实例
-            stock_downloader: 股票数据下载器
-            stooq_downloader: Stooq数据下载器
+            storage: 存储实例，默认使用SQLite
+            注：价格数据一律走 Hybrid 下载器；财务数据走 yfinance
         """
-        self.database = database
-        self.stock_downloader = stock_downloader or YFinanceDataDownloader()
-        self.stooq_downloader = stooq_downloader or StooqDataDownloader()
-        self.logger = logging.getLogger(__name__)
+        self.storage = storage or create_storage('sqlite')
+        self.hybrid = HybridDataDownloader(self.storage)
+        # 财务数据下载仍使用 yfinance 下载器
+        self.yfinance_downloader = YFinanceDataDownloader()
     
+        self.logger = logging.getLogger(__name__)
+
     def get_last_update_date(self, symbol: str) -> Optional[str]:
         """
         获取股票的最后更新日期
@@ -50,7 +56,7 @@ class DataService:
             最后更新日期，如果没有记录则返回None
         """
         try:
-            last_date = self.database.get_last_update_date(symbol)
+            last_date = self.storage.get_last_update_date(symbol)
             if last_date:
                 last_dt = datetime.strptime(last_date, '%Y-%m-%d')
                 next_date = last_dt + timedelta(days=1)
@@ -60,51 +66,23 @@ class DataService:
             self.logger.warning(f"获取 {symbol} 最后更新日期失败: {str(e)}")
             return None
     
-    def download_stock_data(self, symbol: str, start_date: str = None, 
-                          incremental: bool = True, use_retry: bool = True,
-                          downloader_type: str = "yfinance") -> Union[StockData, Dict[str, str]]:
+    def download_stock_data(self, symbol: str, start_date: Optional[str] = None) -> Dict[str, Any]:
         """
-        下载股票数据（支持增量下载）
+        下载股票价格数据（统一走 Hybrid 下载器）
         
         Args:
             symbol: 股票代码
-            start_date: 开始日期
-            incremental: 是否启用增量下载
-            use_retry: 是否使用重试机制
-            downloader_type: 下载器类型 ("yfinance" 或 "stooq")
+            start_date: 开始日期（None 则由 Hybrid 内部自动计算增量）
             
         Returns:
-            股票数据或错误信息
+            结果字典（由 Hybrid 返回，并已入库）
         """
         try:
-            # 确定实际的开始日期
-            actual_start_date = start_date
-            if incremental and start_date is None:
-                last_update = self.get_last_update_date(symbol)
-                if last_update:
-                    actual_start_date = last_update
-                    self.logger.info(f"🔄 {symbol} 启用增量下载，从 {actual_start_date} 开始")
-                else:
-                    actual_start_date = "2020-01-01"  # 默认开始日期
-            elif start_date is None:
-                actual_start_date = "2020-01-01"  # 默认开始日期
-            
-            # 选择下载器并下载数据
-            if downloader_type == "stooq":
-                data = self.stooq_downloader.download_stock_data(
-                    symbol, actual_start_date, None
-                )
-            else:
-                data = self.stock_downloader.download_stock_data(
-                    symbol, actual_start_date, incremental=incremental, use_retry=use_retry
-                )
-            
-            return data
-            
+            return self.hybrid.download_stock_data(symbol, start_date or "2000-01-01")
         except Exception as e:
-            error_msg = f"通过数据服务下载 {symbol} 数据失败: {str(e)}"
+            error_msg = f"通过数据服务(混合)下载 {symbol} 数据失败: {str(e)}"
             self.logger.error(error_msg)
-            return {'error': error_msg}
+            return {'success': False, 'error': error_msg, 'symbol': symbol}
     
     def download_financial_data(self, symbol: str, use_retry: bool = True) -> Union[FinancialData, Dict[str, str]]:
         """
@@ -118,127 +96,54 @@ class DataService:
             财务数据或错误信息
         """
         try:
-            return self.stock_downloader.download_financial_data(symbol, use_retry)
+            return self.yfinance_downloader.download_financial_data(symbol, use_retry)
         except Exception as e:
             error_msg = f"通过数据服务下载 {symbol} 财务数据失败: {str(e)}"
             self.logger.error(error_msg)
             return {'error': error_msg}
     
-    def download_and_store_stock_data(self, symbol: str, start_date: str = None,
-                                    incremental: bool = True, use_retry: bool = True,
-                                    downloader_type: str = "yfinance") -> Dict[str, Any]:
+    def download_and_store_stock_data(self, symbol: str, start_date: Optional[str] = None) -> Dict[str, Any]:
         """
-        下载并存储股票数据
+        下载并存储股票数据（统一走 Hybrid，内部已入库）
         
         Args:
             symbol: 股票代码
             start_date: 开始日期
-            incremental: 是否启用增量下载
-            use_retry: 是否使用重试机制
-            downloader_type: 下载器类型
             
         Returns:
             操作结果
         """
         try:
-            self.logger.info(f"📈 开始下载并存储 {symbol} 股票数据")
-            
-            # 下载数据
-            stock_data = self.download_stock_data(
-                symbol, start_date, incremental, use_retry, downloader_type
-            )
-            
-            # 检查下载结果
-            if isinstance(stock_data, dict) and 'error' in stock_data:
-                return {
-                    'success': False,
-                    'error': stock_data['error'],
-                    'symbol': symbol
-                }
-            
-            # 存储数据到数据库
-            if isinstance(stock_data, StockData):
-                if stock_data.data_points > 0:
-                    self.database.store_stock_prices(
-                        symbol, stock_data.price_data, incremental=incremental
-                    )
-                    
-                    # 记录成功日志
-                    self.database.store_download_log(
-                        symbol, 'stock_prices', 'success', stock_data.data_points
-                    )
-                    
-                    self.logger.info(f"✅ {symbol} 股票数据存储完成: {stock_data.data_points} 个数据点")
-                    return {
-                        'success': True,
-                        'symbol': symbol,
-                        'data_points': stock_data.data_points,
-                        'incremental': incremental
-                    }
-                elif stock_data.no_new_data:
-                    self.logger.info(f"📊 {symbol} 数据已是最新，无需更新")
-                    return {
-                        'success': True,
-                        'symbol': symbol,
-                        'data_points': 0,
-                        'no_new_data': True
-                    }
-            
-            return {
-                'success': False,
-                'error': f'未知数据格式: {type(stock_data)}',
-                'symbol': symbol
-            }
-            
+            self.logger.info(f"📈 开始下载并存储 {symbol} 股票数据（Hybrid）")
+            return self.hybrid.download_stock_data(symbol, start_date or "2000-01-01")
         except Exception as e:
             error_msg = f"下载并存储 {symbol} 数据失败: {str(e)}"
             self.logger.error(error_msg)
-            
-            # 记录失败日志
-            self.database.store_download_log(
-                symbol, 'stock_prices', 'failed', 0, error_msg
-            )
-            
-            return {
-                'success': False,
-                'error': error_msg,
-                'symbol': symbol
-            }
+            return {'success': False, 'error': error_msg, 'symbol': symbol}
     
-    def download_and_store_comprehensive_data(self, symbol: str, start_date: str = None,
-                                            incremental: bool = True, use_retry: bool = True,
-                                            downloader_type: str = "yfinance") -> Dict[str, Any]:
+    def download_and_store_comprehensive_data(self, symbol: str, start_date: Optional[str] = None) -> Dict[str, Any]:
         """
         下载并存储综合数据（价格+财务）
         
         Args:
             symbol: 股票代码
             start_date: 开始日期
-            incremental: 是否启用增量下载
-            use_retry: 是否使用重试机制
-            downloader_type: 下载器类型
             
         Returns:
             操作结果
         """
         try:
-            retry_text = "（启用重试）" if use_retry else ""
-            self.logger.info(f"🚀 开始下载并存储 {symbol} 的综合数据{'（增量模式）' if incremental else '（全量模式）'}{retry_text}")
-            
-            # 下载股票数据
-            stock_data = self.download_stock_data(
-                symbol, start_date, incremental, use_retry, downloader_type
-            )
-            
-            # 下载财务数据
-            financial_data = self.download_financial_data(symbol, use_retry)
+            # 价格数据：统一走 Hybrid（内部已入库）
+            stock_data = self.download_stock_data(symbol, start_date)
+            # 财务数据：走 yfinance
+            financial_data = self.download_financial_data(symbol, use_retry=True)
             
             # 评估数据质量
             # 使用集中化的质量评估逻辑
             data_quality = assess_data_quality(
                 stock_data,
                 financial_data,
-                start_date or "2020-01-01"
+                start_date or "2000-01-01"
             )
             
             # 创建综合数据对象
@@ -253,8 +158,11 @@ class DataService:
                 data_quality=data_quality
             )
             
-            # 存储到数据库
-            self.database.store_comprehensive_data(symbol, comprehensive_data)
+            # 存储到存储层
+            # stock_data 已在 Hybrid 中入库，这里只入库财务与质量
+            if comprehensive_data.financial_data:
+                self.storage.store_financial_data(symbol, comprehensive_data.financial_data)
+            self.storage.store_data_quality(symbol, comprehensive_data.data_quality)
             
             # 计算成功状态
             success_count = 0
@@ -283,9 +191,7 @@ class DataService:
                 'symbol': symbol
             }
     
-    def batch_download_and_store(self, symbols: List[str], start_date: str = None,
-                               incremental: bool = True, use_retry: bool = True,
-                               downloader_type: str = "yfinance", 
+    def batch_download_and_store(self, symbols: List[str], start_date: Optional[str] = None,
                                include_financial: bool = True) -> Dict[str, Dict]:
         """
         批量下载并存储数据
@@ -293,9 +199,6 @@ class DataService:
         Args:
             symbols: 股票代码列表
             start_date: 开始日期
-            incremental: 是否启用增量下载
-            use_retry: 是否使用重试机制
-            downloader_type: 下载器类型
             include_financial: 是否包含财务数据
             
         Returns:
@@ -304,24 +207,19 @@ class DataService:
         results = {}
         total = len(symbols)
         
-        mode_text = "增量下载" if incremental else "全量下载"
-        retry_text = "（启用重试）" if use_retry else ""
         data_type = "综合数据" if include_financial else "股票数据"
+        self.logger.info(f"🎯 开始批量处理 {total} 个股票的{data_type}")
         
-        self.logger.info(f"🎯 开始批量{mode_text} {total} 个股票的{data_type}{retry_text}")
-        
+        # 批量路径：逐只处理（下载器不再提供批量接口）
+
         for i, symbol in enumerate(symbols):
             self.logger.info(f"进度: [{i+1}/{total}] 处理 {symbol}")
             
             try:
                 if include_financial:
-                    result = self.download_and_store_comprehensive_data(
-                        symbol, start_date, incremental, use_retry, downloader_type
-                    )
+                    result = self.download_and_store_comprehensive_data(symbol, start_date)
                 else:
-                    result = self.download_and_store_stock_data(
-                        symbol, start_date, incremental, use_retry, downloader_type
-                    )
+                    result = self.download_and_store_stock_data(symbol, start_date)
                 
                 results[symbol] = result
                 
@@ -355,9 +253,9 @@ class DataService:
     
     def get_existing_symbols(self) -> List[str]:
         """获取数据库中已存在的股票代码列表"""
-        return self.database.get_existing_symbols()
+        return self.storage.get_existing_symbols()
     
     def close(self):
         """关闭数据服务（关闭数据库连接）"""
-        if self.database:
-            self.database.close()
+        if self.storage:
+            self.storage.close()

@@ -35,13 +35,9 @@ def create_storage(storage_type: str = "sqlite", **kwargs) -> BaseStorage:
     storage_class = storage_map[storage_type]
     return storage_class(**kwargs)
 
-# 向后兼容性别名
-StockDatabase = SQLiteStorage  # 保持原有接口
-
 __all__ = [
     'BaseStorage',
     'StorageError', 
     'SQLiteStorage',
-    'create_storage',
-    'StockDatabase'  # 向后兼容
+    'create_storage'
 ]

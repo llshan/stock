@@ -45,57 +45,33 @@
 
 ## 🚀 快速开始
 
-### 方法1：开发模式安装（推荐）
+### 安装依赖（源码运行）
 
 ```bash
 # 克隆项目
 git clone <repository-url>
 cd Stock
 
-# 开发模式安装（可编辑安装）
-pip install -e .
-
-# 或者安装依赖
+# 安装依赖（推荐固定版本）
 pip install -r requirements.txt
-```
-
-### 方法2：正式安装
-
-```bash
-# 构建并安装
-pip install .
-
-# 或从PyPI安装（如果已发布）
-pip install stock-analysis
 ```
 
 ## 🎮 使用方法
 
 ### 🔥 推荐：综合分析系统
 
-**使用python -m模块运行:**
+**直接运行模块（源码）:**
 ```bash
-# 综合分析（示例）
-python -m Stock.analyzer.comprehensive_analyzer
+# 综合分析（示例，可作为样例运行）
+python -m Stock.analysis_service.comprehensive_analyzer
 
-# 数据下载
-python -m Stock.data_service.downloaders.yfinance
-
-# 数据管理器（原混合下载器）
-python -m Stock.data_service.downloaders.hybrid
-```
-
-**使用命令行工具:**
-```bash
-# 如果已安装包，可以直接使用命令行工具
-stock-analyze        # 综合分析
-stock-download       # yfinance下载器
-stock-hybrid         # 数据管理器（原混合下载器）
+# 数据管理器（下载/初始化/更新）- 示例：下载两只股票
+python tools/data_manager.py download -s AAPL MSFT
 ```
 
 **编程方式使用:**
 ```python
-from Stock.analyzer import ComprehensiveStockAnalyzer
+from Stock.analysis_service import ComprehensiveStockAnalyzer
 
 analyzer = ComprehensiveStockAnalyzer()
 symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
@@ -104,14 +80,13 @@ results = analyzer.run_comprehensive_analysis(symbols, period="1y")
 
 ### 📊 数据下载和管理
 
-**使用包模块:**
+**在代码中调用模块:**
 ```python
-from Stock.data_service import DataService, StockDatabase, YFinanceDataDownloader
+from Stock.data_service import DataService, create_storage
 
-# 创建服务
-database = StockDatabase("stocks.db")
-downloader = YFinanceDataDownloader()
-service = DataService(database, downloader)
+# 创建服务（价格数据统一走 Hybrid）
+storage = create_storage('sqlite', db_path="stocks.db")
+service = DataService(storage)
 
 # 下载数据
 result = service.download_and_store_stock_data("AAPL")
@@ -119,9 +94,9 @@ result = service.download_and_store_stock_data("AAPL")
 
 ### 💼 按需启用算子
 ```python
-from analyzer import run_analysis_for_symbols
+from analysis_service import run_analysis_for_symbols
 results = run_analysis_for_symbols(
-    ["AAPL"], db_path='stock_data.db',
+    ["AAPL"], db_path='database/stock_data.db',
     enabled_operators=['ma','rsi','drop_alert','drop_alert_7d','fin_ratios','fin_health']
 )
 print(results['AAPL']['operators']['fin_ratios'])
@@ -140,15 +115,15 @@ stock-hybrid
 
 **编程方式使用:**
 ```python
-from Stock.data_service import DataManager, StockDatabase
+from Stock.data_service import HybridDataDownloader, create_storage
 
-# 创建数据管理器
-database = StockDatabase("stocks.db")
-manager = DataManager(database)
+# 创建数据管理器（价格统一走 Hybrid）
+storage = create_storage('sqlite', db_path="stocks.db")
+manager = HybridDataDownloader(storage)
 
-# 智能批量下载（自动选择最佳数据源）
+# 多只股票时：在应用层逐只调用
 symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = manager.batch_download(symbols)
+results = {s: manager.download_stock_data(s) for s in symbols}
 ```
 
 （已移除旧版：不再提供 yfinance 直连与图表生成功能）
@@ -156,8 +131,8 @@ results = manager.batch_download(symbols)
 ### 🎯 高级自定义
 
 ```python
-from analyzer import ComprehensiveStockAnalyzer
-analyzer = ComprehensiveStockAnalyzer(db_path='stock_data.db', enabled_operators=['ma','rsi','drop_alert','fin_ratios','fin_health'])
+from analysis_service import ComprehensiveStockAnalyzer
+analyzer = ComprehensiveStockAnalyzer(db_path='database/stock_data.db', enabled_operators=['ma','rsi','drop_alert','fin_ratios','fin_health'])
 results = analyzer.run_comprehensive_analysis(["AAPL","NVDA"], period="6mo")
 for symbol, data in results.items():
     print(symbol, data['summary'])
@@ -190,13 +165,13 @@ for symbol, data in results.items():
 
 ```
 Stock/
-├── 📊 analyzer/                 # 核心分析模块包
+├── 📊 analysis_service/         # 核心分析模块包
 │   ├── __init__.py                     # 包初始化
 │   ├── comprehensive_analyzer.py       # 🔥 综合分析系统（封装流水线调用）
 │   ├── app/
 │   │   └── runner.py                  # 流水线运行入口（构建算子/执行/汇总）
 │   ├── data/
-│   │   ├── repository.py              # 行情数据仓储（OHLCV）
+│   │   ├── price_repository.py        # 价格数据仓储（OHLCV）
 │   │   └── financial_repository.py    # 财务数据仓储（报表透视）
 │   ├── operators/                     # 可插拔算子
 │   │   ├── base.py                    # Operator 抽象
@@ -210,32 +185,28 @@ Stock/
 │   │   ├── context.py                 # 分析上下文
 │   │   └── engine.py                  # 执行引擎
 │   └── README.md                       # 模块说明文档
-├── 🌥️ cloud/                   # GCP 部署文件夹
-│   ├── deploy.sh                       # 🚀 自动部署脚本
-│   ├── monitor.sh                      # 📊 系统监控脚本
-│   ├── test_local.py                   # 🧪 本地测试脚本
-│   ├── cloudbuild.yaml                 # ☁️ Cloud Build 配置
-│   ├── database_setup.py               # 🗄️ GCP数据库配置
-│   ├── GCP_DEPLOYMENT_GUIDE.md         # 📖 GCP 部署指南
-│   └── README.md                       # Cloud 目录说明
-├── main.py                      # 🌥️ GCP Cloud Function 入口点
-├── data_manager.py              # 📊 数据管理命令行工具
-├── data_downloader_function.py # 💾 独立数据下载Cloud Function
+├── tools/                       # 工具脚本
+│   └── data_manager.py          # 📊 数据管理命令行工具
+ 
 ├── requirements.txt            # 依赖包列表
 ├── README.md                   # 项目说明文档 (本文件)
-└── results/                    # 📁 分析结果输出文件夹
+└── result/                     # 📁 分析结果输出文件夹
     ├── {股票}_candlestick.html          # K线图
     ├── {股票}_financial_metrics.png     # 财务指标图
     ├── {股票}_health_dashboard.html     # 健康仪表盘
     └── ... (其他图表文件)
 ```
 
-**💡 为什么 `main.py` 在根目录？**
-- `main.py` 是 GCP Cloud Function 的入口点，需要能够导入 `analyzer` 包
-- GCP 部署时会包含整个项目根目录，确保所有模块都可用
-- 这样的结构使得本地开发和云端部署都能正常工作
+（云端部署相关文件与入口已移除，专注本地分析与数据管理）
 
 ## 🔧 故障排除
+
+### 日志初始化
+在脚本或入口处可初始化统一日志：
+```python
+from utils.logging_utils import setup_logging
+setup_logging()
+```
 
 ### 网络问题
 如果遇到网络连接问题或 Yahoo Finance API 限制：

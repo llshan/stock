@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-数据管理器（简化）
-按是否为新股选择数据源并直接写库
+混合数据下载器（简化）
+按策略选择 yfinance / Stooq，并直接写库
 """
 
 import logging
@@ -11,22 +11,22 @@ from typing import Dict, List, Optional, Union
 
 from .stooq import StooqDataDownloader
 from .yfinance import YFinanceDataDownloader
-from ..database import StockDatabase
+from ..storage import create_storage
 
 
-class DataManager:
-    """数据管理器（推荐使用）"""
+class HybridDataDownloader:
+    """混合数据下载器"""
     
-    def __init__(self, database: StockDatabase, max_retries: int = 3, base_delay: int = 30):
+    def __init__(self, storage=None, max_retries: int = 3, base_delay: int = 30):
         """
         初始化混合股票下载器
         
         Args:
-            database: 数据库实例
+            storage: 存储实例，默认使用SQLite
             max_retries: 最大重试次数
             base_delay: 基础延迟时间（秒）
         """
-        self.database = database
+        self.storage = storage or create_storage('sqlite')
         self.logger = logging.getLogger(__name__)
         
         # 创建下载器实例
@@ -36,24 +36,21 @@ class DataManager:
         )
         self.stooq_downloader = StooqDataDownloader(max_retries=max_retries)
         
-        self.logger.info(f"🚀 数据管理器初始化完成")
+        self.logger.info(f"🚀 混合数据下载器初始化完成")
     
     def _is_new_stock(self, symbol: str) -> bool:
         """检查是否为新股票"""
-        existing_symbols = self.database.get_existing_symbols()
+        existing_symbols = self.storage.get_existing_symbols()
         return symbol not in existing_symbols
     
     def _get_last_update_date(self, symbol: str) -> Optional[str]:
         """获取股票的最后更新日期"""
         try:
-            query = "SELECT MAX(date) FROM stock_prices WHERE symbol = ?"
-            result = self.database.cursor.execute(query, (symbol,)).fetchone()
-            
-            if result and result[0]:
-                last_date = datetime.strptime(result[0], '%Y-%m-%d')
-                next_date = last_date + timedelta(days=1)
+            last_date = self.storage.get_last_update_date(symbol)
+            if last_date:
+                last_dt = datetime.strptime(last_date, '%Y-%m-%d')
+                next_date = last_dt + timedelta(days=1)
                 return next_date.strftime('%Y-%m-%d')
-            
             return None
         except Exception as e:
             self.logger.warning(f"获取 {symbol} 最后更新日期失败: {str(e)}")
@@ -73,16 +70,16 @@ class DataManager:
         """
         try:
             is_new = self._is_new_stock(symbol)
-            
+
             if is_new:
-                # 新股票使用Stooq进行批量历史数据下载
-                self.logger.info(f"🆕 {symbol} 是新股票，使用Stooq进行批量下载")
-                strategy = "Stooq批量历史数据"
+                # 新股票使用Stooq进行历史全量数据下载
+                self.logger.info(f"🆕 {symbol} 是新股票，使用Stooq进行历史全量下载")
+                strategy = "Stooq历史全量"
                 
                 stock_data = self.stooq_downloader.download_stock_data(symbol, start_date)
                 if hasattr(stock_data, 'symbol') and stock_data.data_points > 0:
-                    self.database.store_stock_prices(symbol, stock_data.price_data, incremental=False)
-                    self.database.store_download_log(symbol, 'stock_prices', 'success', stock_data.data_points)
+                    self.storage.store_stock_data(symbol, stock_data)
+                    # Download logging is now handled automatically
                     
                     result = {
                         'success': True,
@@ -95,21 +92,34 @@ class DataManager:
                     result = {'success': False, 'error': 'Stooq下载失败', 'symbol': symbol}
                     
             else:
-                # 已有股票使用yfinance进行增量更新
-                self.logger.info(f"🔄 {symbol} 已存在，使用yfinance进行增量更新")
-                strategy = "yfinance增量更新"
-                
+                # 已有股票：按最后更新时间距今的天数选择策略
+                raw_last = self.storage.get_last_update_date(symbol)
                 actual_start_date = self._get_last_update_date(symbol) or start_date
-                
-                stock_data = self.yfinance_downloader.download_stock_data(
-                    symbol, actual_start_date, incremental=True
-                )
-                
+                days_since = None
+                try:
+                    if raw_last:
+                        days_since = (datetime.now() - datetime.strptime(raw_last, '%Y-%m-%d')).days
+                except Exception:
+                    days_since = None
+
+                if days_since is not None and days_since > 100:
+                    # 超过100天未更新：使用 Stooq 做长期补全（适合大跨度补齐）
+                    self.logger.info(f"🔄 {symbol} 距上次更新 {days_since} 天，使用 Stooq 长期补全")
+                    strategy = "Stooq长期补全(>100d)"
+                    stock_data = self.stooq_downloader.download_stock_data(
+                        symbol, actual_start_date
+                    )
+                else:
+                    # 未超过100天：使用 yfinance 做增量更新（更灵活）
+                    self.logger.info(f"🔄 {symbol} 距上次更新 {days_since if days_since is not None else '?'} 天，使用 yfinance 增量更新")
+                    strategy = "yfinance增量更新(<=100d)"
+                    stock_data = self.yfinance_downloader.download_stock_data(
+                        symbol, actual_start_date, incremental=True
+                    )
+
                 if hasattr(stock_data, 'symbol'):
                     if stock_data.data_points > 0:
-                        self.database.store_stock_prices(symbol, stock_data.price_data, incremental=True)
-                        self.database.store_download_log(symbol, 'stock_prices', 'success', stock_data.data_points)
-                        
+                        self.storage.store_stock_data(symbol, stock_data)
                         result = {
                             'success': True,
                             'symbol': symbol,
@@ -118,7 +128,6 @@ class DataManager:
                             'incremental': True
                         }
                     else:
-                        # 无新数据
                         result = {
                             'success': True,
                             'symbol': symbol,
@@ -127,7 +136,8 @@ class DataManager:
                             'used_strategy': strategy
                         }
                 else:
-                    result = {'success': False, 'error': 'yfinance下载失败', 'symbol': symbol}
+                    err_src = 'yfinance' if 'yfinance' in strategy else 'stooq'
+                    result = {'success': False, 'error': f'{err_src}下载失败', 'symbol': symbol}
             
             return result
             
@@ -136,143 +146,64 @@ class DataManager:
             self.logger.error(f"❌ {symbol} {error_msg}")
             
             # 记录失败日志
-            self.database.store_download_log(symbol, 'stock_prices', 'failed', 0, error_msg)
+            # Error logging is now handled automatically by storage
             
             return {'success': False, 'error': error_msg, 'symbol': symbol}
     
-    def batch_download(self, symbols: List[str], start_date: str = "2000-01-01", **kwargs) -> Dict[str, Dict]:
-        """
-        批量下载股票数据
-        
-        Args:
-            symbols: 股票代码列表
-            start_date: 开始日期
-            **kwargs: 额外参数
-            
-        Returns:
-            批量下载结果
-        """
-        results = {}
-        total = len(symbols)
-        
-        self.logger.info(f"🎯 开始混合策略批量下载 {total} 个股票")
-        
-        # 统计策略使用情况
-        strategy_usage = {}
-        
-        for i, symbol in enumerate(symbols):
-            self.logger.info(f"进度: [{i+1}/{total}] 处理 {symbol}")
-            
-            try:
-                result = self.download_stock_data(symbol, start_date, **kwargs)
-                
-                # 统计策略使用
-                used_strategy = result.get('used_strategy', 'Unknown')
-                strategy_usage[used_strategy] = strategy_usage.get(used_strategy, 0) + 1
-                
-                results[symbol] = result
-                
-                # 添加延迟避免API限制
-                if i < total - 1:
-                    import time
-                    time.sleep(2)
-                    
-            except Exception as e:
-                self.logger.error(f"处理 {symbol} 时出错: {str(e)}")
-                results[symbol] = {
-                    'success': False,
-                    'error': str(e),
-                    'symbol': symbol
-                }
-        
-        # 统计结果
-        successful = len([r for r in results.values() if r.get('success', False)])
-        failed = total - successful
-        
-        self.logger.info(f"✅ 混合策略批量下载完成，成功: {successful}/{total}")
-        
-        # 记录策略使用统计
-        self.logger.info("📊 策略使用统计:")
-        for strategy_name, count in strategy_usage.items():
-            self.logger.info(f"   {strategy_name}: {count} 次")
-        
-        return {
-            'total': total,
-            'successful': successful,
-            'failed': failed,
-            'strategy_usage': strategy_usage,
-            'results': results
-        }
+    # 批量相关操作已移除：此下载器仅提供单只股票下载接口
     
     def get_existing_symbols(self) -> List[str]:
         """获取数据库中已存在的股票代码列表"""
-        return self.database.get_existing_symbols()
+        return self.storage.get_existing_symbols()
     
     def close(self):
         """关闭混合下载器"""
-        if self.database:
-            self.database.close()
+        if self.storage:
+            self.storage.close()
 
-
-def create_watchlist() -> List[str]:
-    """创建需要关注的股票清单"""
-    return [
-        "AAPL",   # 苹果
-        "GOOG",   # 谷歌
-        "LULU"    # Lululemon
-    ]
 
 
 if __name__ == "__main__":
     # 配置日志
-    from logging_utils import setup_logging
+    from utils.logging_utils import setup_logging
+    from ..config import get_default_watchlist
     setup_logging()
-        logging.getLogger(__name__).info("🔄 数据管理器（简化）")
+    logging.getLogger(__name__).info("🔄 混合数据下载器（简化）")
     logging.getLogger(__name__).info("=" * 60)
     logging.getLogger(__name__).info("💡 自动选择最佳下载策略，无需复杂配置")
     logging.getLogger(__name__).info("=" * 60)
     
     try:
-        # 创建数据库和混合下载器
-        database = StockDatabase("hybrid_stocks.db")
-        manager = DataManager(database)
+        # 创建混合下载器
+        manager = HybridDataDownloader()  # 使用默认storage
         
-        # 获取关注股票列表
-        watchlist = create_watchlist()
+        # 示例股票列表（演示用途，统一方法）
+        watchlist = get_default_watchlist()
         
         logging.getLogger(__name__).info(f"📊 将下载 {len(watchlist)} 个股票的数据:")
         for i, symbol in enumerate(watchlist, 1):
             logging.getLogger(__name__).info(f"  {i:2d}. {symbol}")
         
-        # 执行批量混合下载
-        results = manager.batch_download(watchlist, start_date="2000-01-01")
-        
-        # 显示下载结果摘要
+        # 逐个下载（演示单股接口）
+        total = len(watchlist)
+        ok = 0
+        for i, symbol in enumerate(watchlist, 1):
+            logging.getLogger(__name__).info(f"📥 [{i}/{total}] 下载 {symbol} …")
+            res = manager.download_stock_data(symbol, start_date="2000-01-01")
+            if res.get('success'):
+                ok += 1
+                dp = res.get('data_points', 0)
+                logging.getLogger(__name__).info(f"   {symbol}: {dp} 条（策略：{res.get('used_strategy','?')}）")
+            else:
+                logging.getLogger(__name__).error(f"   {symbol}: {res.get('error','未知错误')}")
+            import time; time.sleep(2)
+
+        # 摘要
         logging.getLogger(__name__).info("=" * 60)
         logging.getLogger(__name__).info("📊 混合下载结果摘要:")
-        logging.getLogger(__name__).info(f"   总计: {results['total']} 个股票")
-        logging.getLogger(__name__).info(f"   成功: {results['successful']} 个")
-        logging.getLogger(__name__).info(f"   失败: {results['failed']} 个")
-        
-        # 显示策略使用统计
-        if results.get('strategy_usage'):
-            logging.getLogger(__name__).info("📋 策略使用统计:")
-            for strategy_name, count in results['strategy_usage'].items():
-                logging.getLogger(__name__).info(f"   {strategy_name}: {count} 次")
-        
-        # 详细结果
-        if results.get('results'):
-            logging.getLogger(__name__).info("📋 详细结果:")
-            for symbol, result in results['results'].items():
-                if result.get('success'):
-                    data_points = result.get('data_points', 0)
-                    if result.get('no_new_data'):
-                        logging.getLogger(__name__).info(f"   {symbol}: 数据已最新 ✅")
-                    else:
-                        logging.getLogger(__name__).info(f"   {symbol}: {data_points} 个数据点 ✅")
-                else:
-                    error = result.get('error', '未知错误')[:50]
-                    logging.getLogger(__name__).error(f"   {symbol}: {error}... ❌")
+        logging.getLogger(__name__).info(f"   总计: {total} 个股票")
+        logging.getLogger(__name__).info(f"   成功: {ok} 个")
+        logging.getLogger(__name__).info(f"   失败: {total-ok} 个")
         
         logging.getLogger(__name__).info("💾 数据已保存到 hybrid_stocks.db")
         logging.getLogger(__name__).info("📈 可以使用数据库工具查看完整的股票数据")
@@ -286,4 +217,4 @@ if __name__ == "__main__":
         # 清理资源
         if 'manager' in locals():
             manager.close()
-            logging.getLogger(__name__).info("🔧 数据管理器已关闭")
+            logging.getLogger(__name__).info("🔧 混合数据下载器已关闭")

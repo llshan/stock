@@ -1,9 +1,9 @@
 import os
 import pandas as pd
 
-from analyzer.pipeline.context import AnalysisContext
-from analyzer.operators.fin_ratios import FinancialRatioOperator
-from analyzer.operators.fin_health import FinancialHealthOperator
+from analysis_service.pipeline.context import AnalysisContext
+from analysis_service.operators.fin_ratios import FinancialRatioOperator
+from analysis_service.operators.fin_health import FinancialHealthOperator
 
 
 class DummyCfg:
@@ -62,4 +62,3 @@ def test_financial_ratio_and_health(tmp_path):
     ctx.extras['fin_ratios'] = ratios
     health = FinancialHealthOperator().run(ctx)
     assert 'health_score' in health and 'grade' in health
-

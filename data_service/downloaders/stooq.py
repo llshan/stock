@@ -40,12 +40,12 @@ class StooqDataDownloader(BaseDownloader):
             包含价格数据的字典
         """
         def _download():
-            return self._download_stooq_data(symbol, start_date, end_date)
+            return self._download_stock_data_internal(symbol, start_date, end_date)
         
         return self._retry_with_backoff(_download, symbol)
     
-    def _download_stooq_data(self, symbol: str, start_date: str, end_date: str = None) -> Union[StockData, Dict[str, str]]:
-        """内部Stooq数据下载实现"""
+    def _download_stock_data_internal(self, symbol: str, start_date: str, end_date: str = None) -> Union[StockData, Dict[str, str]]:
+        """内部 Stooq 股票数据下载实现（命名与 yfinance 对齐）"""
         try:
             if end_date is None:
                 end_date = datetime.now().strftime('%Y-%m-%d')
@@ -79,9 +79,9 @@ class StooqDataDownloader(BaseDownloader):
             summary_stats = SummaryStats(
                 min_price=float(data['Close'].min()),
                 max_price=float(data['Close'].max()),
-                avg_price=float(data['Close'].mean()),
-                total_volume=int(data['Volume'].sum()),
-                avg_volume=int(data['Volume'].mean())
+                mean_price=float(data['Close'].mean()),
+                std_price=float(data['Close'].std()),
+                total_volume=int(data['Volume'].sum())
             )
             
             stock_data = StockData(
@@ -126,59 +126,10 @@ class StooqDataDownloader(BaseDownloader):
             self.logger.error(f"❌ Stooq连接失败: {str(e)}")
             return False
     
-    def get_available_symbols(self) -> List[str]:
-        """获取可用的股票代码列表"""
-        # Stooq支持的主要美股代码
-        us_stocks = [
-            'AAPL', 'GOOGL', 'MSFT', 'AMZN', 'META', 'TSLA', 'NVDA',
-            'NFLX', 'UBER', 'ZOOM', 'JPM', 'JNJ', 'PG', 'KO', 'WMT',
-            'DIS', 'V', 'MA', 'BABA', 'JD', 'BIDU', 'CRM', 'ORCL',
-            'IBM', 'INTC', 'AMD', 'QCOM', 'ADBE', 'PYPL', 'SHOP',
-            'SQ', 'TWTR', 'SNAP', 'PINS', 'ROKU', 'ZM', 'DOCU',
-            'PTON', 'ABNB', 'COIN', 'HOOD', 'RBLX', 'U', 'PLTR'
-        ]
-        return us_stocks
-    
-    def batch_download(self, symbols: List[str], start_date: str = "2000-01-01", end_date: str = None) -> Dict[str, Union[StockData, Dict[str, str]]]:
-        """
-        批量下载股票数据
-        
-        Args:
-            symbols: 股票代码列表
-            start_date: 开始日期
-            end_date: 结束日期
-            
-        Returns:
-            所有股票数据的字典
-        """
-        results = {}
-        total = len(symbols)
-        
-        self.logger.info(f"🎯 开始从Stooq批量下载 {total} 个股票的数据")
-        
-        for i, symbol in enumerate(symbols):
-            self.logger.info(f"进度: [{i+1}/{total}] 处理 {symbol}")
-            
-            try:
-                results[symbol] = self.download_stock_data(symbol, start_date, end_date)
-                
-                # 添加延迟避免请求过快
-                if i < total - 1:
-                    time.sleep(1)  # Stooq通常比Yahoo Finance更宽松
-                    
-            except Exception as e:
-                self.logger.error(f"下载 {symbol} 时出错: {str(e)}")
-                results[symbol] = {'error': str(e)}
-        
-        successful = len([r for r in results.values() if 'error' not in r])
-        self.logger.info(f"✅ Stooq批量下载完成，成功: {successful}/{total}")
-        return results
-    
-    # 该下载器已在 _download_stooq_data 中输出统一的 StockData 格式，无需额外格式化
-
 if __name__ == "__main__":
     # 测试Stooq下载器
-    from logging_utils import setup_logging
+    from utils.logging_utils import setup_logging
+    from ..config import get_default_watchlist
     setup_logging()
     logging.getLogger(__name__).info("🌐 Stooq股票数据下载器测试")
     logging.getLogger(__name__).info("=" * 50)
@@ -189,29 +140,16 @@ if __name__ == "__main__":
     if downloader.test_connection():
         logging.getLogger(__name__).info("✅ Stooq连接测试成功")
         
-        # 测试单个股票下载
-        logging.getLogger(__name__).info("📈 测试下载AAPL数据…")
-        result = downloader.download_stock_data('AAPL', start_date='2000-01-01')
-        
-        if isinstance(result, dict) and 'error' in result:
-            logging.getLogger(__name__).error(f"❌ AAPL数据下载失败: {result['error']}")
-        elif hasattr(result, 'data_points'):
-            logging.getLogger(__name__).info("✅ AAPL数据下载成功:")
-            logging.getLogger(__name__).info(f"   数据点数: {result.data_points}")
-            logging.getLogger(__name__).info(f"   时间范围: {result.start_date} 到 {result.end_date}")
-            if result.price_data and result.price_data.close:
-                logging.getLogger(__name__).info(f"   最新价格: ${result.price_data.close[-1]:.2f}")
-        
-        # 测试批量下载
-        logging.getLogger(__name__).info("📊 测试批量下载…")
-        symbols = ['AAPL', 'GOOGL', 'MSFT']
-        batch_results = downloader.batch_download(symbols, start_date='2000-01-01')
-        
-        for symbol, data in batch_results.items():
-            if isinstance(data, dict) and 'error' in data:
-                logging.getLogger(__name__).error(f"❌ {symbol}: {data['error']}")
-            elif hasattr(data, 'data_points'):
-                logging.getLogger(__name__).info(f"✅ {symbol}: {data.data_points} 个数据点")
+        # 示例：逐只下载一个简短的关注列表
+        symbols = get_default_watchlist()
+        for i, sym in enumerate(symbols, 1):
+            logging.getLogger(__name__).info(f"📈 [{i}/{len(symbols)}] 测试下载 {sym} 数据…")
+            result = downloader.download_stock_data(sym, start_date='2000-01-01')
+            if isinstance(result, dict) and 'error' in result:
+                logging.getLogger(__name__).error(f"❌ {sym} 数据下载失败: {result['error']}")
+            elif hasattr(result, 'data_points'):
+                logging.getLogger(__name__).info(f"✅ {sym}: {result.data_points} 个数据点，范围 {result.start_date} ~ {result.end_date}")
+            time.sleep(1)
     
     else:
         logging.getLogger(__name__).error("❌ Stooq连接测试失败，请检查网络连接")

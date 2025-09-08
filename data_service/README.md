@@ -17,11 +17,11 @@ print(f"使用策略: {result.get('used_strategy')}")
 
 # 批量下载
 symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = manager.batch_download(symbols)
+results = {s: manager.download_stock_data(s) for s in symbols}
 ```
 
 ### 传统使用方式
-（已简化，建议直接使用上面的便捷函数或 DataManager）
+（已简化，建议直接使用上面的便捷函数或 HybridDataDownloader）
 
 ## 📁 模块结构
 
@@ -36,7 +36,7 @@ data_service/
 │   ├── base.py                      # 🏗️ 下载器抽象基类
 │   ├── yfinance.py                  # 📈 Yahoo Finance 数据下载器  
 │   ├── stooq.py                     # 📊 Stooq 数据下载器
-│   └── hybrid.py                    # 🔄 混合下载策略管理器（简化版，推荐名：DataManager）
+│   └── hybrid.py                    # 🔄 混合数据下载器（HybridDataDownloader）
 └── README.md                        # 📄 本文件
 ```
 
@@ -69,9 +69,9 @@ def _is_api_error_retryable(error)     # 判断错误是否可重试
 - 公司基本信息和关键指标
 
 ### 📊 `downloaders/stooq.py` - Stooq 数据下载器  
-**专用于大批量历史数据下载**
+**专用于长期历史数据下载**
 - `StooqDataDownloader`: 继承自BaseDownloader
-- 优化的批量下载性能
+- 适合大跨度历史数据补齐
 - 长期历史数据获取
 - 与yfinance形成互补
 
@@ -81,9 +81,9 @@ def _is_api_error_retryable(error)     # 判断错误是否可重试
 - 数据完整性验证
 - 格式标准化处理
 
-### 🔄 `downloaders/hybrid.py` - 数据管理器（简化）
-**按是否新股选择数据源，并直接写库**
-- `DataManager`: 新股走 Stooq 全量，老股走 yfinance 增量
+### 🔄 `downloaders/hybrid.py` - 混合数据下载器（简化）
+**按是否新股与更新时间选择数据源，直接入库**
+- `HybridDataDownloader`: 新股走 Stooq 全量；老股>100天未更新用 Stooq，否则用 yfinance 增量
 - 内置简单策略与日志，便捷落地
 
 ### 💾 `database.py` - 数据持久化层
@@ -138,7 +138,7 @@ def get_existing_symbols()                    # 获取已有股票列表
 graph TD
     A[DataService 核心服务] --> B[YFinanceDataDownloader]
     A --> C[StooqDataDownloader] 
-    A --> D[DataManager]
+    A --> D[HybridDataDownloader]
     A --> E[StockDatabase]
     
     B --> F[BaseDownloader]
@@ -176,7 +176,7 @@ manager = create_data_manager(
 
 # 智能下载
 result = manager.download_stock_data("AAPL")
-results = manager.batch_download(['AAPL', 'GOOGL', 'MSFT'])
+results = {s: manager.download_stock_data(s) for s in ['AAPL','GOOGL','MSFT']}
 ```
 
 （不再提供 `create_simple_downloader` API）
@@ -185,11 +185,11 @@ results = manager.batch_download(['AAPL', 'GOOGL', 'MSFT'])
 
 #### 1. 数据管理器直接使用
 ```python
-from data_service import DataManager, StockDatabase
+from data_service import HybridDataDownloader, create_storage
 
 # 手动创建和配置
-database = StockDatabase("stocks.db")
-manager = DataManager(database, max_retries=5)
+storage = create_storage('sqlite', db_path="stocks.db")
+manager = HybridDataDownloader(storage, max_retries=5)
 
 # 下载单个股票（内部自动选择数据源）
 result = manager.download_stock_data('AAPL')
@@ -199,20 +199,15 @@ result = manager.download_stock_data('AAPL')
 
 #### 2. 数据服务直接使用
 ```python
-from data_service import DataService, StockDatabase, YFinanceDataDownloader
+from data_service import DataService, create_storage
 
-# 创建服务组件
-database = StockDatabase("stocks.db")
-downloader = YFinanceDataDownloader()
-service = DataService(database, downloader)
+# 创建服务组件（价格数据统一走 Hybrid）
+storage = create_storage('sqlite', db_path="stocks.db")
+service = DataService(storage)
 
 # 批量下载和存储
 symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = service.batch_download_and_store(
-    symbols, 
-    include_financial=True,
-    incremental=True
-)
+results = service.batch_download_and_store(symbols, include_financial=True)
 ```
 
 #### 3. 直接使用下载器
@@ -255,9 +250,10 @@ restored_data = PriceData.from_dict(data_dict)
 
 ### 数据质量监控
 ```python
-from data_service import DataService
+from data_service import DataService, create_storage
 
-service = DataService(database, downloader)
+storage = create_storage('sqlite', db_path="stocks.db")
+service = DataService(storage)
 
 # 下载综合数据时自动评估质量
 result = service.download_and_store_comprehensive_data("AAPL")
@@ -291,7 +287,7 @@ config = {
 1. 继承 `BaseDownloader`
 2. 实现必要的抽象方法
 3. 返回标准化的数据模型
-4. 在 `DataManager` 中添加对应策略（当前简化实现，暂不支持策略插拔）
+4. 在 `HybridDataDownloader` 中添加对应策略（当前简化实现，暂不支持策略插拔）
 
 ### 自定义数据模型
 1. 在 `models.py` 中定义新的 DataClass
@@ -334,9 +330,9 @@ downloader = YFinanceDataDownloader(
 )
 ```
 
-### DataManager 配置  
+### HybridDataDownloader 配置  
 ```python
-manager = DataManager(
+manager = HybridDataDownloader(
     database=database,
     max_retries=5,          # 最大重试次数
     base_delay=30           # 基础延迟时间
@@ -345,11 +341,9 @@ manager = DataManager(
 
 ### DataService 配置
 ```python
-service = DataService(
-    database=database,
-    stock_downloader=YFinanceDataDownloader(),    # 可选，默认创建新实例
-    stooq_downloader=StooqDataDownloader()        # 可选，默认创建新实例  
-)
+# 价格数据统一走 Hybrid，无需显式传入下载器
+from data_service import DataService, create_storage
+service = DataService(create_storage('sqlite', db_path="stocks.db"))
 ```
 
 ## 🚦 最佳实践
@@ -362,14 +356,14 @@ service = DataService(
    manager = create_data_manager("stocks.db")
    
    # 而不是：手动组装
-   database = StockDatabase("stocks.db")  
-   manager = DataManager(database)
+   storage = create_storage('sqlite', db_path="stocks.db")
+   manager = HybridDataDownloader(storage)
    ```
 
 2. **📦 批量操作优先**: 
    ```python
    # 推荐：批量下载
-   results = manager.batch_download(['AAPL', 'GOOGL', 'MSFT'])
+   results = {s: manager.download_stock_data(s) for s in ['AAPL','GOOGL','MSFT']}
    
    # 避免：逐个下载
    for symbol in symbols:

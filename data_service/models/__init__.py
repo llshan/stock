@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 数据模型模块
-重构后的模型组织，保持向后兼容性
+重构后的模型组织
 """
 
 # 基础模型
@@ -46,29 +46,12 @@ from .quality_models import (
     create_download_result
 )
 
-# 为了向后兼容，保持原有的导入别名
-DownloadErrorInfo = DownloadError  # 别名兼容
-
-# 向后兼容的工具函数，保持原有的函数签名
-def create_empty_stock_data(symbol: str, start_date: str, end_date: str, error_msg: str) -> dict:
-    """向后兼容的空股票数据创建函数"""
-    from .price_models import create_empty_stock_data as _create_empty_stock_data
-    return _create_empty_stock_data(symbol, start_date, end_date, error_msg)
-
-
-def create_empty_financial_data(symbol: str, error_msg: str) -> dict:
-    """向后兼容的空财务数据创建函数"""
-    from .financial_models import create_empty_financial_data as _create_empty_financial_data
-    return _create_empty_financial_data(symbol, error_msg)
-
-
 __all__ = [
     # 基础模型
     'BaseDataModel',
     'SummaryStats', 
     'BasicInfo',
     'DownloadError',
-    'DownloadErrorInfo',  # 向后兼容别名
     
     # 价格模型
     'PriceData',
