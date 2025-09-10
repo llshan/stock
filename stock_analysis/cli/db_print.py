@@ -19,7 +19,6 @@
 import argparse
 import logging
 import sqlite3
-from typing import Optional
 from pathlib import Path
 
 import pandas as pd
@@ -82,7 +81,9 @@ def cmd_print(args: argparse.Namespace) -> int:
         if args.where:
             sql += f" WHERE {args.where}"
         if args.order_by:
-            order_expr = " ".join(args.order_by) if isinstance(args.order_by, list) else str(args.order_by)
+            order_expr = (
+                " ".join(args.order_by) if isinstance(args.order_by, list) else str(args.order_by)
+            )
             sql += f" ORDER BY {order_expr}"
         if args.limit:
             sql += f" LIMIT {int(args.limit)}"
@@ -108,8 +109,6 @@ def cmd_print(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description='SQLite 数据库查看工具')
     sub = p.add_subparsers(dest='command', required=True)
-
-    common = dict()
 
     sp = sub.add_parser('list', help='列出所有表')
     sp.add_argument('--db-path', default='database/stock_data.db', help='数据库路径')

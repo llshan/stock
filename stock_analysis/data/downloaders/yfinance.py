@@ -6,11 +6,15 @@
 
 import logging
 import time
+import random
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 import yfinance as yf
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from ..models import (
     BasicInfo,
@@ -26,10 +30,54 @@ from .base import BaseDownloader
 
 
 class YFinanceDataDownloader(BaseDownloader):
-    def __init__(self, max_retries: int = 3, base_delay: int = 30):
-        """初始化股票数据下载器"""
+    def __init__(
+        self,
+        max_retries: int = 3,
+        base_delay: int = 30,
+        y_min_interval: float = 0.8,
+        y_retry_total: int = 5,
+        y_backoff_factor: float = 1.5,
+        strict_meta_check: bool = False,
+        use_fast_info: bool = True,
+    ):
+        """初始化股票数据下载器（增强抗限流能力）"""
         super().__init__(max_retries=max_retries, base_delay=base_delay)
         self.start_date = "2000-01-01"
+        # 节流配置
+        self._min_interval = y_min_interval
+        self._last_ts = 0.0
+        self._strict_meta_check = strict_meta_check
+        self._use_fast_info = use_fast_info
+        # 复用会话 + 自动重试
+        self.session = requests.Session()
+        retries = Retry(
+            total=y_retry_total,
+            backoff_factor=y_backoff_factor,
+            status_forcelist=[429, 502, 503, 504],
+            allowed_methods=["GET", "POST"],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+        self.session.mount("https://", adapter)
+        self.session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+        )
+
+    def _throttle(self) -> None:
+        now = time.monotonic()
+        wait = self._min_interval - (now - self._last_ts)
+        if wait > 0:
+            time.sleep(wait + random.uniform(0, 0.25))
+        self._last_ts = time.monotonic()
+
+    def _ticker(self, symbol: str):
+        return yf.Ticker(symbol, session=self.session)
 
     def download_stock_data(
         self,
@@ -100,16 +148,18 @@ class YFinanceDataDownloader(BaseDownloader):
                     no_new_data=True,
                 )
 
-            # 下载股票数据
-            ticker = yf.Ticker(symbol)
-            # 尝试提前触发一次元信息请求，若 yfinance 请求失败则尽早抛错
-            try:
-                if hasattr(ticker, 'get_info'):
-                    ticker.get_info() or {}
-                else:
-                    ticker.info or {}
-            except Exception as meta_err:
-                raise RuntimeError(f"yfinance 元信息请求失败: {meta_err}")
+            # 下载股票数据（统一会话 + 节流，可选元信息预检）
+            ticker = self._ticker(symbol)
+            if self._strict_meta_check:
+                self._throttle()
+                try:
+                    if hasattr(ticker, 'get_info'):
+                        ticker.get_info() or {}
+                    else:
+                        ticker.info or {}
+                except Exception as meta_err:
+                    raise RuntimeError(f"yfinance 预检失败: {meta_err}")
+            self._throttle()
             hist_data = ticker.history(start=start_date, end=today)
 
             if hist_data.empty:
@@ -183,28 +233,41 @@ class YFinanceDataDownloader(BaseDownloader):
         """内部财务数据下载实现（更健壮，避免 info 失败中断）"""
         try:
             self.logger.info(f"💼 下载 {symbol} 财务报表数据")
-            ticker = yf.Ticker(symbol)
-            # 尝试提前触发一次元信息请求，若 yfinance 请求失败则尽早抛错
-            try:
+            ticker = self._ticker(symbol)
+            # fast_info 优先
+            fast = None
+            if self._use_fast_info:
+                try:
+                    self._throttle()
+                    fast = ticker.fast_info
+                except Exception:
+                    fast = None
+            # 必要时再获取 info（或启用严格预检时）
+            info: Dict[str, Any] = {}
+            if self._strict_meta_check or not fast:
+                self._throttle()
                 if hasattr(ticker, 'get_info'):
                     info = ticker.get_info() or {}
                 else:
                     info = ticker.info or {}
-            except Exception as meta_err:
-                raise RuntimeError(f"yfinance 元信息请求失败: {meta_err}")
 
+            name = (getattr(fast, 'shortName', None) if fast is not None else None) or info.get('longName', '')
+            market_cap = (getattr(fast, 'market_cap', None) if fast is not None else None) or info.get('marketCap', 0)
             basic_info = BasicInfo(
-                company_name=info.get('longName', ''),
+                company_name=name or '',
                 sector=info.get('sector', ''),
                 industry=info.get('industry', ''),
-                market_cap=info.get('marketCap', 0),
+                market_cap=market_cap or 0,
                 employees=info.get('fullTimeEmployees', 0),
                 description=info.get('longBusinessSummary', ''),
             )
 
-            # 获取财务报表（如失败则抛错，尽早返回）
+            # 获取财务报表（逐次节流）
+            self._throttle()
             financials = ticker.financials
+            self._throttle()
             balance_sheet = ticker.balance_sheet
+            self._throttle()
             cash_flow = ticker.cashflow
 
             financial_statements = {}

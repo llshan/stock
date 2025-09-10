@@ -27,6 +27,12 @@ class DownloaderConfig:
     hybrid_threshold_days: int = 100
     # 财务刷新阈值（天）：距离最近财报期超过该天数则重新抓取财务
     financial_refresh_days: int = 90
+    # yfinance 限流/重试/信息获取策略
+    yfinance_min_interval_s: float = 0.8
+    yfinance_retry_total: int = 5
+    yfinance_backoff_factor: float = 1.5
+    strict_yfinance_meta_check: bool = False
+    yfinance_use_fast_info: bool = True
 
 
 @dataclass

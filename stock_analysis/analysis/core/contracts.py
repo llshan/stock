@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, List, Optional, Literal
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, List, Literal, Optional
 
 
 @dataclass
@@ -54,4 +54,3 @@ class AnalysisResult:
             'errors': [e.to_dict() for e in self.errors],
             'metrics': self.metrics,
         }
-

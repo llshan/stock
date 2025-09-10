@@ -1,247 +1,338 @@
-# 综合股票分析系统
+# 🎯 Stock Analysis System
 
-一个功能强大的股票分析工具，结合技术分析和财务分析，提供全方位的投资决策支持。
+一个现代化的股票数据获取、存储和技术分析系统，采用标准Python包架构设计。
 
-## 🚀 核心功能
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Code Style](https://img.shields.io/badge/Code%20Style-Black-black.svg)](https://black.readthedocs.io)
 
-### 📈 技术分析模块
-1. **实时数据获取**：获取股票的实时价格和交易信息
-2. **历史数据分析**：下载和分析历史价格数据
-3. **技术指标计算**：
-   - 移动平均线 (MA5, MA10, MA20, MA50)
-   - 相对强弱指数 (RSI)
-   - 布林带 (Bollinger Bands)
-4. **技术图表生成**：
-   - K线图 (蜡烛图)
-   - RSI指标图
-   - 布林带图表
+## ✨ 核心特性
 
-### 💼 财务分析模块 (新增)
-1. **财务数据获取**：获取过去5年的财务报表数据
-2. **财务指标计算**：
-   - 盈利能力：净利润率、ROE、ROA
-   - 偿债能力：负债率、流动比率
-   - 估值指标：市盈率(PE)、市净率(PB)
-   - 成长性：营收增长率、利润增长率
-3. **财务健康评估**：综合评分和等级评定
-4. **财务图表生成**：
-   - 营收趋势图
-   - 财务指标对比图
-   - 健康评分仪表盘
+### 📊 数据管理
+- **多源数据获取**: 集成 yfinance 和 Stooq 数据源
+- **智能下载策略**: 自动选择最优数据源和增量更新
+- **数据质量评估**: 自动检测和报告数据完整性
+- **SQLite存储**: 高效的本地数据存储和管理
 
-### 🎯 综合分析系统
-1. **技术+财务双重分析**：结合价格走势和基本面
-2. **智能评级系统**：A-F五级评定
-3. **投资建议生成**：买入/持有/卖出建议
-4. **风险提示**：识别潜在投资风险
-5. **综合报告**：生成专业投资分析报告
+### 📈 技术分析
+- **技术指标**: RSI、移动平均线、布林带等
+- **可插拔算子**: 模块化的分析操作器系统
+- **趋势分析**: 自动识别股票趋势和信号
+- **风险提醒**: 股价异常波动预警
 
-### 💾 历史数据管理系统 (新增)
-1. **完整数据下载**：从2020年开始的所有价格和财务数据
-2. **结构化存储**：SQLite/PostgreSQL数据库存储
-3. **数据质量监控**：自动评估数据完整性和质量
-4. **批量管理**：支持多股票批量下载和更新
-5. **GCP云端部署**：支持Cloud SQL数据库
+### 🔧 现代化架构
+- **标准Python包**: 可pip安装，无路径依赖
+- **命令行工具**: 专业的CLI界面
+- **模块化设计**: 清晰的层次结构和职责分离
+- **可扩展性**: 支持自定义分析器和数据源
 
 ## 🚀 快速开始
 
-### 安装依赖（源码运行）
+### 安装
 
 ```bash
 # 克隆项目
-git clone <repository-url>
-cd Stock
+git clone https://github.com/llshan/stock.git
+cd stock
 
-# 安装依赖（SQLite 默认）
-pip install -r requirements.txt
-
-# （可选）PostgreSQL 支持
-# 默认未包含 PG 依赖，如需使用 PostgreSQL，可单独安装：
-#   pip install psycopg2-binary
-# 并确保系统已安装 pg_config（macOS 可通过 Homebrew 安装 postgresql）。
+# 安装依赖并以开发模式安装
+pip install -e .
 ```
 
-## 🎮 使用方法
+### 基本使用
 
-### 🔥 推荐：综合分析系统
-
-**直接运行模块（源码）:**
+#### 1. 数据下载
 ```bash
-# 综合分析（示例，可作为样例运行）
-python -m Stock.analysis_service.analysis_service
+# 下载单只股票
+stock-data download -s AAPL
 
-# 数据管理器（下载/初始化/更新）- 示例：下载两只股票
-python tools/data_manager.py download -s AAPL MSFT
+# 下载多只股票
+stock-data download -s AAPL GOOG MSFT
+
+# 下载并包含财务数据
+stock-data download -s AAPL --comprehensive
+
+# 仅下载财务数据
+stock-data download -s AAPL --financial-only
 ```
 
-**编程方式使用:**
-```python
-from Stock.analysis_service import AnalysisService
+#### 2. 数据查询
+```bash
+# 查看股票数据
+stock-data query -s AAPL
 
-analyzer = AnalysisService()
-symbols = ["AAPL", "GOOGL", "MSFT", "TSLA"]
-results = analyzer.run_comprehensive_analysis(symbols, period="1y")
+# 指定时间范围
+stock-data query -s AAPL --start-date 2023-01-01 --end-date 2024-01-01
+
+# 限制显示行数
+stock-data query -s AAPL --limit 10
 ```
 
-### 📊 数据下载和管理
+#### 3. 技术分析
+```bash
+# 分析单只股票（1年期）
+stock-analyze -s AAPL --period 1y
 
-**在代码中调用模块:**
+# 分析多只股票（6个月期）
+stock-analyze -s AAPL GOOG --period 6mo
+
+# 自定义分析算子
+stock-analyze -s AAPL --operators ma,rsi,drop_alert
+```
+
+#### 4. 数据库管理
+```bash
+# 查看数据库表
+stock-db list
+
+# 查看表结构
+stock-db schema -t stocks
+
+# 查看表数据
+stock-db print -t stocks --limit 10
+```
+
+## 📦 项目结构
+
+```
+stock_analysis/
+├── __init__.py              # 包入口
+├── data/                    # 数据层
+│   ├── downloaders/        # 数据下载器
+│   ├── storage/            # 数据存储
+│   ├── models/             # 数据模型
+│   └── config.py           # 配置管理
+├── analysis/               # 分析层
+│   ├── operators/          # 分析算子
+│   ├── pipeline/           # 分析流水线
+│   └── config.py          # 分析配置
+├── cli/                    # 命令行工具
+│   ├── data_manager.py     # 数据管理CLI
+│   ├── data_analyzer.py    # 分析CLI
+│   └── db_print.py         # 数据库CLI
+└── utils/                  # 工具函数
+    └── logging_utils.py    # 日志工具
+```
+
+## 🛠️ 作为Python库使用
+
+### 基础用法
+
 ```python
-from Stock.data_service import DataService, create_storage
+from stock_analysis import DataService, AnalysisService
 
-# 创建服务（价格数据统一走 Hybrid）
-storage = create_storage('sqlite', db_path="stocks.db")
-service = DataService(storage)
+# 初始化服务
+data_service = DataService()
+analysis_service = AnalysisService()
+
+# 下载股票数据
+result = data_service.download_and_store_stock_data('AAPL')
+print(f"Downloaded {result['data_points']} data points")
+
+# 技术分析
+analysis_result = analysis_service.run_analysis(['AAPL'], period='1y')
+print(analysis_result['AAPL']['summary'])
+```
+
+### 自定义数据源
+
+```python
+from stock_analysis.data.storage import create_storage
+from stock_analysis.data.downloaders import StooqDataDownloader
+
+# 使用特定数据源
+storage = create_storage('sqlite', db_path='my_data.db')
+downloader = StooqDataDownloader()
 
 # 下载数据
-result = service.download_and_store_stock_data("AAPL")
+data = downloader.download_stock_data('AAPL', '2023-01-01')
+storage.store_stock_data('AAPL', data)
 ```
 
-### 💼 按需启用算子
+### 自定义分析算子
+
 ```python
-from analysis_service import run_analysis_for_symbols
-results = run_analysis_for_symbols(
-    ["AAPL"], db_path='database/stock_data.db',
-    enabled_operators=['ma','rsi','drop_alert','drop_alert_7d','fin_ratios','fin_health']
-)
-print(results['AAPL']['operators']['fin_ratios'])
+from stock_analysis.analysis.operators.base import Operator
+import pandas as pd
+
+class MyCustomOperator(Operator):
+    def execute(self, data: pd.DataFrame) -> dict:
+        # 自定义分析逻辑
+        return {
+            'signal': 'buy' if data['close'].iloc[-1] > data['close'].mean() else 'sell',
+            'confidence': 0.85
+        }
 ```
 
-### 💾 数据管理的新方式
+## ⚙️ 配置
 
-**使用混合下载器（推荐）:**
+### 环境变量
+
 ```bash
-# 使用python -m运行混合下载器
-python -m Stock.data_service.downloaders.hybrid
+# 设置默认数据库路径
+export STOCK_DB_PATH="path/to/your/database.db"
 
-# 或使用命令行工具
-stock-hybrid
+# 设置默认关注股票列表
+export WATCHLIST="AAPL,GOOG,MSFT,TSLA"
+
+# 设置日志级别
+export LOG_LEVEL="INFO"
 ```
 
-**编程方式使用:**
-```python
-from Stock.data_service import HybridDataDownloader, create_storage
+### 配置文件
 
-# 创建数据管理器（价格统一走 Hybrid）
-storage = create_storage('sqlite', db_path="stocks.db")
-manager = HybridDataDownloader(storage)
+创建 `config.yml`：
 
-# 多只股票时：在应用层逐只调用
-symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = {s: manager.download_stock_data(s) for s in symbols}
+```yaml
+database:
+  path: "database/stock_data.db"
+  
+downloader:
+  hybrid_threshold_days: 100
+  financial_refresh_days: 90
+  retry_attempts: 3
+
+analysis:
+  default_period: "1y"
+  operators: ["ma", "rsi", "drop_alert"]
 ```
 
-（已移除旧版：不再提供 yfinance 直连与图表生成功能）
+## 📊 支持的技术指标
 
-### 🎯 高级自定义
+### 当前指标
+- **移动平均线** (MA): 5日、10日、20日、50日均线
+- **相对强弱指数** (RSI): 14周期RSI
+- **趋势分析**: 基于均线的趋势判断
+- **跌幅警报**: 异常波动监测
+
+### 计划指标
+- MACD (移动平均收敛散度)
+- 布林带 (Bollinger Bands)  
+- KDJ 随机指标
+- 成交量指标
+
+## 🗃️ 数据源
+
+### 支持的数据源
+- **yfinance**: 实时和历史数据，财务报表
+- **Stooq**: 历史价格数据，数据质量高
+- **混合策略**: 自动选择最优数据源
+
+### 数据质量
+- 自动数据验证和清洗
+- 缺失数据检测和报告
+- 数据完整性评分 (A-F等级)
+
+## 🧪 开发和测试
+
+### 开发环境搭建
+
+```bash
+# 克隆项目
+git clone https://github.com/llshan/stock.git
+cd stock
+
+# 创建虚拟环境
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# venv\\Scripts\\activate  # Windows
+
+# 安装开发依赖
+pip install -e ".[dev]"
+```
+
+### 代码风格
+
+项目使用以下工具维护代码质量：
+
+```bash
+# 代码格式化
+black stock_analysis/
+
+# 代码检查
+flake8 stock_analysis/
+
+# 类型检查
+mypy stock_analysis/
+
+# 导入排序
+isort stock_analysis/
+```
+
+## 📈 使用示例
+
+### 完整分析流程
 
 ```python
-from analysis_service import AnalysisService
-analyzer = AnalysisService(db_path='database/stock_data.db', enabled_operators=['ma','rsi','drop_alert','fin_ratios','fin_health'])
-results = analyzer.run_comprehensive_analysis(["AAPL","NVDA"], period="6mo")
+from stock_analysis import DataService, AnalysisService
+import json
+
+# 1. 下载数据
+data_service = DataService()
+symbols = ['AAPL', 'GOOG', 'MSFT']
+
+for symbol in symbols:
+    result = data_service.download_and_store_comprehensive_data(symbol)
+    print(f"{symbol}: {'✅' if result['success'] else '❌'}")
+
+# 2. 技术分析
+analysis_service = AnalysisService()
+results = analysis_service.run_analysis(symbols, period='6mo')
+
+# 3. 结果展示
 for symbol, data in results.items():
-    print(symbol, data['summary'])
+    summary = data['summary']
+    print(f"""
+    {symbol} 分析结果:
+    - 趋势: {summary['trend']}
+    - RSI信号: {summary['rsi_signal']}
+    - 风险警报: {'是' if summary['drop_alert'] else '否'}
+    """)
 ```
 
-## 📁 输出
-仅文本日志与结构化结果（dict/JSON）。无图表输出。
+### 批量数据管理
 
-### 数据分析工具（本地）
-- 执行可插拔算子并输出 JSON 到 `result/`：
-  - `python tools/data_analyzer.py -s AAPL MSFT --period 6mo --db-path database/stock_data.db`
-  - 或从文件读取：`python tools/data_analyzer.py --symbols-file symbols.txt --start-date 2022-01-01`
+```bash
+# 批量下载热门股票
+stock-data download -s AAPL GOOG MSFT TSLA NVDA --comprehensive -v
 
-## 📖 指标说明
+# 批量分析
+stock-analyze -s AAPL GOOG MSFT TSLA NVDA --period 1y --output results.json
 
-### 📈 技术指标
-- **移动平均线 (MA)**: MA5, MA20, MA50 用于判断趋势方向
-- **RSI (相对强弱指数)**: 0-100区间，>70超买，<30超卖
-- **布林带**: 上中下轨反映价格波动性和支撑阻力位
-
-### 💼 财务指标 (新增)
-- **盈利能力**: 净利润率、ROE(净资产收益率)、ROA(资产收益率)
-- **偿债能力**: 负债率、流动比率
-- **估值指标**: 市盈率(PE)、市净率(PB)
-- **成长性**: 营收和利润增长率
-
-### 🎯 综合评级系统 (新增)
-- **A级 (80-100分)**: 强烈推荐 - 买入
-- **B级 (60-79分)**: 推荐 - 买入/持有
-- **C级 (40-59分)**: 中性 - 持有
-- **D级 (20-39分)**: 不推荐 - 减持
-- **F级 (0-19分)**: 强烈不推荐 - 卖出
-
-## 📂 项目结构（节选）
-
-```
-Stock/
-├── 📊 analysis_service/         # 核心分析模块包
-│   ├── __init__.py                     # 包初始化
-│   ├── analysis_service.py             # 🔥 综合分析系统（封装流水线调用）
-│   ├── app/
-│   │   └── runner.py                  # 流水线运行入口（构建算子/执行/汇总）
-│   ├── data/
-│   │   ├── price_repository.py        # 价格数据仓储（OHLCV）
-│   │   └── financial_repository.py    # 财务数据仓储（报表透视）
-│   ├── operators/                     # 可插拔算子
-│   │   ├── base.py                    # Operator 抽象
-│   │   ├── ma.py                      # 移动平均
-│   │   ├── rsi.py                     # RSI
-│   │   ├── drop_alert.py              # 1天跌幅预警
-│   │   ├── drop_alert_7d.py           # 7天跌幅预警
-│   │   ├── fin_ratios.py              # 财务比率
-│   │   └── fin_health.py              # 财务健康度
-│   ├── pipeline/
-│   │   ├── context.py                 # 分析上下文
-│   │   └── engine.py                  # 执行引擎
-│   └── README.md                       # 模块说明文档
-├── tools/                       # 工具脚本
-│   └── data_manager.py          # 📊 数据管理命令行工具
- 
-├── requirements.txt            # 依赖包列表
-├── README.md                   # 项目说明文档 (本文件)
-└── result/                     # 📁 分析结果输出文件夹
-    ├── {股票}_candlestick.html          # K线图
-    ├── {股票}_financial_metrics.png     # 财务指标图
-    ├── {股票}_health_dashboard.html     # 健康仪表盘
-    └── ... (其他图表文件)
+# 查看结果
+cat results.json | jq '.[] | {symbol: .symbol, trend: .summary.trend}'
 ```
 
-（云端部署相关文件与入口已移除，专注本地分析与数据管理）
+## 🤝 贡献指南
 
-## 🔧 故障排除
+1. Fork 项目
+2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
 
-### 日志初始化
-在脚本或入口处可初始化统一日志：
-```python
-from utils.logging_utils import setup_logging
-setup_logging()
-```
+## 📄 许可证
 
-### 网络问题
-如果遇到网络连接问题或 Yahoo Finance API 限制：
-1. 检查网络连接是否正常
-2. 尝试更换网络环境
-3. 程序会自动重试并给出错误提示
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
 
-### 常见问题
-1. **中文字体警告**: 属正常现象，不影响功能
-2. **数据获取失败**: 检查股票代码是否正确，网络是否正常
-3. **图表无法显示**: 确保浏览器支持HTML5
-4. **财务数据缺失**: 某些股票可能没有完整的财务数据
+## 🔗 相关链接
 
-## ⚠️ 重要声明
+- [项目首页](https://github.com/llshan/stock)
+- [问题报告](https://github.com/llshan/stock/issues)
+- [贡献指南](CONTRIBUTING.md)
+- [更新日志](CHANGELOG.md)
 
-1. **数据来源**: 数据来自 Yahoo Finance，可能有延迟或不完整
-2. **投资建议**: 本程序提供的分析仅供参考，不构成投资建议
-3. **风险提示**: 股市有风险，投资需谨慎
-4. **数据准确性**: 请以官方财报和实时行情为准
+## 💡 常见问题
 
-## 🎓 学习价值
+### Q: 如何解决429错误？
+A: 这是API速率限制，请等待几小时后重试，或使用 `--financial-only` 跳过财务数据下载。
 
-本项目展示了以下技术栈和概念：
-- **数据科学**: pandas, numpy 数据处理
-- **可视化**: matplotlib, plotly 图表生成
-- **金融分析**: 技术指标和财务比率计算
-- **API集成**: yfinance 数据获取
-- **软件工程**: 模块化设计、错误处理、文档编写
+### Q: 数据不完整怎么办？
+A: 使用 `stock-data query -s SYMBOL` 检查数据范围，然后重新下载：`stock-data download -s SYMBOL --start-date 2020-01-01`
+
+### Q: 如何添加新的技术指标？
+A: 继承 `Operator` 基类创建新算子，参考 `analysis/operators/` 目录下的示例。
+
+---
+
+**Stock Analysis System** - 让股票分析变得简单高效 🚀

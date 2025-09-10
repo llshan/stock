@@ -31,7 +31,11 @@ class RSIOperator(Operator):
         data: pd.DataFrame = ctx.extras.get('ma_data')
         if data is None:
             data = ctx.data.copy()
-        period = self.period if self.period is not None else getattr(ctx.config.technical, 'rsi_period', 14)
+        period = (
+            self.period
+            if self.period is not None
+            else getattr(ctx.config.technical, 'rsi_period', 14)
+        )
         period = int(period) if period is not None else 14
         if 'Close' not in data.columns or len(data) < period + 1:
             return {'error': 'insufficient_data'}

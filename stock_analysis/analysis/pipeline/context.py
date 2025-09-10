@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict
+
 import pandas as pd
 
 
@@ -12,4 +13,3 @@ class AnalysisContext:
     data: pd.DataFrame
     config: Any
     extras: Dict[str, Any] = field(default_factory=dict)
-

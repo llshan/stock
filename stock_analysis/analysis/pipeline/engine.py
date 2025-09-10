@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from typing import List, Dict, Any
 import logging
-from .context import AnalysisContext
-from ..operators.base import Operator
-from ..core.contracts import OperatorResult, Error
 import time
+from typing import Dict, List
 
+from ..core.contracts import Error, OperatorResult
+from ..operators.base import Operator
+from .context import AnalysisContext
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class PipelineEngine:
     """Sequentially run operators, collecting their results with isolation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
     def run(self, ctx: AnalysisContext, operators: List[Operator]) -> Dict[str, OperatorResult]:
@@ -35,7 +35,7 @@ class PipelineEngine:
                     )
                 else:
                     results[op.name] = OperatorResult(
-                        data=data if isinstance(data, dict) else {'value': data},
+                        data=(data if isinstance(data, dict) else {'value': data}),
                         error=None,
                         duration_ms=duration_ms,
                     )

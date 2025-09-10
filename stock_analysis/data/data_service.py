@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from .config import DataServiceConfig
 from .downloaders.stooq import StooqDataDownloader
-from .downloaders.yfinance import YFinanceDataDownloader
+from .downloaders.twelvedata import TwelveDataDownloader
 from .models import (
     FinancialData,
     StockData,
@@ -32,7 +32,9 @@ class DataService:
     负责协调下载器和数据库操作，提供统一的数据管理接口
     """
 
-    def __init__(self, storage: Optional[BaseStorage] = None, config: Optional[DataServiceConfig] = None):
+    def __init__(
+        self, storage: Optional[BaseStorage] = None, config: Optional[DataServiceConfig] = None
+    ):
         """
         初始化数据服务
 
@@ -42,8 +44,8 @@ class DataService:
         """
         self.storage: BaseStorage = storage or create_storage('sqlite')
         self.config = config or DataServiceConfig()
-        # 下载器实例
-        self.yfinance_downloader = YFinanceDataDownloader()
+        # 下载器实例（使用 Twelve Data 替代 yfinance）
+        self.twelvedata_downloader = TwelveDataDownloader()
         self.stooq_downloader = StooqDataDownloader()
 
         self.logger = logging.getLogger(__name__)
@@ -109,10 +111,17 @@ class DataService:
                     days = 9999
                 threshold = getattr(self.config.downloader, 'hybrid_threshold_days', 100)
                 if days <= threshold:
-                    used = 'yfinance增量更新(<=阈值)'
-                    data = self.yfinance_downloader.download_stock_data(
+                    used = 'twelvedata增量更新(<=阈值)'
+                    data = self.twelvedata_downloader.download_stock_data(
                         symbol, actual_start, incremental=True, use_retry=True
                     )
+                    # 若 Twelve Data 失败，回退到 Stooq 兜底
+                    if isinstance(data, dict) and 'error' in data:
+                        self.logger.warning(
+                            f"twelvedata 增量失败，使用 Stooq 回退: {data['error']}"
+                        )
+                        used = 'Stooq回退(增量失败)'
+                        data = self.stooq_downloader.download_stock_data(symbol, actual_start)
                 else:
                     used = 'Stooq批量下载补全(>阈值)'
                     data = self.stooq_downloader.download_stock_data(symbol, actual_start)
@@ -182,7 +191,7 @@ class DataService:
                     'used_strategy': 'skip_recent_financial',
                 }
 
-            fin = self.yfinance_downloader.download_financial_data(symbol, use_retry=True)
+            fin = self.twelvedata_downloader.download_financial_data(symbol, use_retry=True)
             if isinstance(fin, dict) and 'error' in fin:
                 return {
                     'success': False,
@@ -205,7 +214,7 @@ class DataService:
                     'success': True,
                     'symbol': symbol,
                     'statements': stmt_count,
-                    'used_strategy': 'yfinance_financial',
+                    'used_strategy': 'twelvedata_financial',
                 }
 
             return {
@@ -323,6 +332,8 @@ class DataService:
                 self.storage._ensure_stock_exists(symbol)
                 self.logger.info(f"🪪 已创建空股票记录: {symbol}")
             else:
-                self.logger.warning(f"Storage implementation does not support _ensure_stock_exists for {symbol}")
+                self.logger.warning(
+                    f"Storage implementation does not support _ensure_stock_exists for {symbol}"
+                )
         except Exception as e:
             self.logger.error(f"❌ 创建股票记录失败 {symbol}: {e}")

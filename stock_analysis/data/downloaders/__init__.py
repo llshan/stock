@@ -4,11 +4,8 @@
 """
 
 from .base import BaseDownloader
-from .yfinance import YFinanceDataDownloader
 from .stooq import StooqDataDownloader
+from .yfinance import YFinanceDataDownloader
+from .twelvedata import TwelveDataDownloader
 
-__all__ = [
-    'BaseDownloader',
-    'YFinanceDataDownloader', 
-    'StooqDataDownloader'
-]
+__all__ = ['BaseDownloader', 'YFinanceDataDownloader', 'StooqDataDownloader', 'TwelveDataDownloader']

@@ -3,8 +3,9 @@ Stock Analysis System - Setup Configuration
 股票分析系统安装配置
 """
 
-from setuptools import setup, find_packages
 from pathlib import Path
+
+from setuptools import find_packages, setup
 
 # 读取README文件
 readme_file = Path(__file__).parent / "README.md"

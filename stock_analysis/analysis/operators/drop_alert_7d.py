@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-from typing import Dict, Any
 import logging
-from .drop_alert import DropAlertOperator
 
+from .drop_alert import DropAlertOperator
 
 logger = logging.getLogger(__name__)
 

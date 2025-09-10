@@ -19,14 +19,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Optional
 
-from stock_analysis.utils.logging_utils import setup_logging
 from stock_analysis.analysis import AnalysisService
 from stock_analysis.analysis.config import get_config
-
+from stock_analysis.utils.logging_utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--operators', help='逗号分隔的算子列表（默认从配置读取）')
 
     # 输出与日志
-    parser.add_argument('--output', help='输出 JSON 路径（默认 analysis_result/analysis_{ts}.json）')
+    parser.add_argument(
+        '--output',
+        help='输出 JSON 路径（默认 analysis_result/analysis_{ts}.json）',
+    )
     parser.add_argument('--indent', type=int, default=2, help='JSON缩进（默认2）')
     parser.add_argument('-v', '--verbose', action='store_true', help='详细日志')
 
@@ -110,12 +112,17 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         enabled_ops = [s.strip() for s in args.operators.split(',') if s.strip()]
         logger.info(f"启用算子: {enabled_ops}")
 
-    logger.info(f"开始分析 {len(symbols)} 个股票，db={args.db_path}，范围 {start or 'auto'} ~ {end or 'latest'}")
+    logger.info(
+        f"开始分析 {len(symbols)} 个股票，db={args.db_path}，范围 {start or 'auto'} ~ {end or 'latest'}"
+    )
     analyzer = AnalysisService(db_path=args.db_path, enabled_operators=enabled_ops)
     results = analyzer.run_analysis(symbols, period=args.period, start=start, end=end)
 
     out_path = _resolve_output_path(args.output)
-    out_path.write_text(json.dumps(results, ensure_ascii=False, indent=args.indent), encoding='utf-8')
+    out_path.write_text(
+        json.dumps(results, ensure_ascii=False, indent=args.indent),
+        encoding='utf-8',
+    )
     logger.info(f"✅ 分析结果已保存: {out_path}")
     return 0
 

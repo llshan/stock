@@ -5,7 +5,7 @@ Stock Analysis System - 股票分析系统
 
 主要模块:
 - data: 数据获取和存储
-- analysis: 技术分析和财务分析  
+- analysis: 技术分析和财务分析
 - cli: 命令行工具
 - utils: 工具函数
 """
@@ -13,7 +13,7 @@ Stock Analysis System - 股票分析系统
 __version__ = "1.0.0"
 __author__ = "Jiulong Shan"
 
-from .data import DataService
 from .analysis import AnalysisService
+from .data import DataService
 
 __all__ = ["DataService", "AnalysisService"]

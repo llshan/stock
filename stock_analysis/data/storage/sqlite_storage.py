@@ -69,7 +69,9 @@ class SQLiteStorage(BaseStorage):
     def _check_connection(self, operation_name: str = "operation") -> None:
         """检查数据库连接是否可用"""
         if self.cursor is None or self.connection is None:
-            raise StorageError(f"Database connection not available for {operation_name}", operation_name)
+            raise StorageError(
+                f"Database connection not available for {operation_name}", operation_name
+            )
 
     def _create_tables(self) -> None:
         """创建或修复数据库表结构（仅在缺失时执行）"""

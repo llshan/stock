@@ -12,11 +12,12 @@
 
 from __future__ import annotations
 
-from typing import Optional, Protocol, List, Dict, Any
 import logging
-import pandas as pd
-from stock_analysis.data.storage import create_storage
+from typing import Any, Dict, List, Optional, Protocol
 
+import pandas as pd
+
+from stock_analysis.data.storage import create_storage
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,14 @@ class DatabaseFinancialRepository:
                                 val = values[idx]
                         except Exception:
                             val = None
-                        rows.append({
-                            'statement_type': stmt_type,
-                            'period_date': period,
-                            'item_name': item_name,
-                            'value': val
-                        })
+                        rows.append(
+                            {
+                                'statement_type': stmt_type,
+                                'period_date': period,
+                                'item_name': item_name,
+                                'value': val,
+                            }
+                        )
             df = pd.DataFrame(rows)
             # 规范列类型
             if not df.empty:
@@ -82,5 +85,10 @@ class DatabaseFinancialRepository:
         df = self.get_statements(symbol, statement_type)
         if df is None or df.empty:
             return pd.DataFrame()
-        pivot = df.pivot_table(index='item_name', columns='period_date', values='value', aggfunc='first')
+        pivot = df.pivot_table(
+            index='item_name',
+            columns='period_date',
+            values='value',
+            aggfunc='first',
+        )
         return pivot
