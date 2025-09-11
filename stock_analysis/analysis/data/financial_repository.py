@@ -42,32 +42,39 @@ class DatabaseFinancialRepository:
         self._logger = logging.getLogger(__name__)
 
     def get_statements(self, symbol: str, statement_type: Optional[str] = None) -> pd.DataFrame:
+        """从新的分离表结构中读取财务报表数据"""
         try:
-            fin = self._db.get_financial_data(symbol)
-            if fin is None or not getattr(fin, 'financial_statements', None):
-                return pd.DataFrame()
-            rows: List[Dict[str, Any]] = []
-            for stmt_type, stmt in fin.financial_statements.items():
-                if statement_type and stmt_type != statement_type:
+            import sqlite3
+            
+            # 直接查询数据库的分离表
+            conn = sqlite3.connect(self._db.db_path)
+            conn.row_factory = sqlite3.Row
+            
+            # 构建查询
+            tables = []
+            if statement_type is None:
+                tables = ['income_statement', 'balance_sheet', 'cash_flow']
+            else:
+                tables = [statement_type]
+            
+            rows = []
+            for table_name in tables:
+                query = f"SELECT period, metric_name, metric_value FROM {table_name} WHERE symbol = ? ORDER BY period DESC"
+                try:
+                    cursor = conn.execute(query, (symbol,))
+                    for row in cursor:
+                        rows.append({
+                            'statement_type': table_name,
+                            'period_date': row['period'],
+                            'item_name': row['metric_name'],
+                            'value': row['metric_value']
+                        })
+                except sqlite3.OperationalError as e:
+                    self._logger.warning(f"Table {table_name} not found or query failed: {e}")
                     continue
-                periods = list(getattr(stmt, 'periods', []) or [])
-                items = getattr(stmt, 'items', {}) or {}
-                for idx, period in enumerate(periods):
-                    for item_name, values in items.items():
-                        val = None
-                        try:
-                            if idx < len(values):
-                                val = values[idx]
-                        except Exception:
-                            val = None
-                        rows.append(
-                            {
-                                'statement_type': stmt_type,
-                                'period_date': period,
-                                'item_name': item_name,
-                                'value': val,
-                            }
-                        )
+            
+            conn.close()
+            
             df = pd.DataFrame(rows)
             # 规范列类型
             if not df.empty:
@@ -76,6 +83,13 @@ class DatabaseFinancialRepository:
                         df['period_date'] = pd.to_datetime(df['period_date']).dt.date.astype(str)
                     except Exception:
                         pass
+                        
+                # Normalize metric names to handle Unicode quote variations
+                # Replace curly quotes with straight quotes for consistency
+                df['item_name'] = df['item_name'].str.replace(chr(8217), chr(39), regex=False)  # ' -> '
+                df['item_name'] = df['item_name'].str.replace(chr(8216), chr(39), regex=False)  # ' -> '
+                df['item_name'] = df['item_name'].str.replace(chr(8220), '"', regex=False)     # " -> "
+                df['item_name'] = df['item_name'].str.replace(chr(8221), '"', regex=False)     # " -> "
             return df
         except Exception as e:
             self._logger.error(f"get_statements 失败: {symbol}: {e}")
@@ -85,7 +99,13 @@ class DatabaseFinancialRepository:
         df = self.get_statements(symbol, statement_type)
         if df is None or df.empty:
             return pd.DataFrame()
-        pivot = df.pivot_table(
+        
+        # After normalization, we may have duplicate metric names for the same periods
+        # Keep only the most recent data for each metric_name/period combination
+        df = df.sort_values('period_date', ascending=False)
+        df_deduped = df.drop_duplicates(subset=['item_name', 'period_date'], keep='first')
+        
+        pivot = df_deduped.pivot_table(
             index='item_name',
             columns='period_date',
             values='value',

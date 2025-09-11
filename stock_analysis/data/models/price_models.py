@@ -89,7 +89,7 @@ class StockData:
     price_data: PriceData
     summary_stats: SummaryStats
     downloaded_at: str
-    data_source: str = "yfinance"
+    data_source: str = "stooq"
     incremental_update: bool = False
     no_new_data: bool = False
 
@@ -119,7 +119,7 @@ class StockData:
             price_data=PriceData.from_dict(data['price_data']),
             summary_stats=SummaryStats.from_dict(data['summary_stats']),
             downloaded_at=data['downloaded_at'],
-            data_source=data.get('data_source', 'yfinance'),
+            data_source=data.get('data_source', 'stooq'),
             incremental_update=data.get('incremental_update', False),
             no_new_data=data.get('no_new_data', False),
         )

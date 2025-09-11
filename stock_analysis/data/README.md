@@ -8,7 +8,7 @@
 ```python
 from data_service import DataService, create_storage
 
-# 🎯 推荐：创建数据服务（价格走Hybrid，财务走yfinance）
+# 🎯 推荐：创建数据服务（价格走Stooq，财务走Finnhub）
 service = DataService(create_storage('sqlite', db_path="my_stocks.db"))
 
 # 智能下载并入库（自动选择最佳价格数据源）
@@ -35,7 +35,7 @@ data_service/
 ├── downloaders/                     # 📥 下载器模块
 │   ├── __init__.py                  # 下载器包初始化
 │   ├── base.py                      # 🏗️ 下载器抽象基类
-│   ├── yfinance.py                  # 📈 Yahoo Finance 数据下载器  
+│   ├── finnhub.py                   # 📈 Finnhub 财务数据下载器  
 │   ├── stooq.py                     # 📊 Stooq 数据下载器
 │   └── （已合并）                    # 下载策略已并入 DataService
 └── README.md                        # 📄 本文件
@@ -56,25 +56,25 @@ def _retry_with_backoff(func, symbol)  # 带退避的重试机制
 def _is_api_error_retryable(error)     # 判断错误是否可重试
 ```
 
-### 📈 `downloaders/yfinance.py` - Yahoo Finance 下载器
-**基于yfinance的主要数据下载器**
-- `YFinanceDataDownloader`: 继承自BaseDownloader
-- 支持股票价格和财务数据下载
+### 📈 `downloaders/finnhub.py` - Finnhub 财务数据下载器
+**基于Finnhub API的财务数据下载器**
+- `FinnhubDownloader`: 继承自BaseDownloader
+- 专注于财务数据下载
 - 返回结构化的DataClass对象
-- 智能增量下载和数据验证
+- 支持多种财务报表
 
 **主要功能:**
-- 历史股票价格数据 (OHLCV)
-- 实时股票数据
 - 财务报表 (损益表、资产负债表、现金流)
-- 公司基本信息和关键指标
+- 财务指标计算
+- 多期数据获取
+- API密钥认证
 
 ### 📊 `downloaders/stooq.py` - Stooq 数据下载器  
 **专用于长期历史数据下载**
 - `StooqDataDownloader`: 继承自BaseDownloader
 - 适合大跨度历史数据补齐
 - 长期历史数据获取
-- 与yfinance形成互补
+- 与Finnhub形成互补
 
 **主要功能:**
 - 大批量历史数据下载
@@ -85,7 +85,8 @@ def _is_api_error_retryable(error)     # 判断错误是否可重试
 ### 🔄 自动策略下载
 **DataService 内置：按是否新股与更新时间选择数据源，并直接入库**
 - 新股：Stooq 全量
-- 老股：距离上次更新>阈值（默认100天）用 yfinance，否则用 Stooq 补全
+- 价格数据：使用 Stooq 获取历史价格数据
+- 财务数据：使用 Finnhub 获取财务报表和指标
 
 ### 💾 `database.py` - 数据持久化层
 **统一的数据库访问接口**
@@ -137,9 +138,9 @@ def get_existing_symbols()                    # 获取已有股票列表
 
 ```mermaid
 graph TD
-    A[DataService 核心服务] --> B[YFinanceDataDownloader]
+    A[DataService 核心服务] --> B[FinnhubDownloader]
     A --> C[StooqDataDownloader] 
-    A --> D[自动策略（内置）]
+    A --> D[数据整合（内置）]
     A --> E[StockDatabase]
     
     B --> F[BaseDownloader]
@@ -195,10 +196,10 @@ results = service.batch_download_and_store(symbols, include_financial=True)
 
 #### 3. 直接使用下载器
 ```python
-from data_service import YFinanceDataDownloader, StooqDataDownloader
+from data_service import FinnhubDownloader, StooqDataDownloader
 
-# YFinance 下载器
-yf_downloader = YFinanceDataDownloader(max_retries=3, base_delay=30)
+# Finnhub 下载器
+finnhub_downloader = FinnhubDownloader()
 stock_data = yf_downloader.download_stock_data("AAPL")
 financial_data = yf_downloader.download_financial_data("AAPL")
 
@@ -250,7 +251,7 @@ print(fin_res)
 # 配置混合下载器策略
 config = {
     "strategies": [
-        {"name": "yfinance", "enabled": True, "priority": 10},
+        {"name": "finnhub", "enabled": True, "priority": 10},
         {"name": "stooq", "enabled": False, "priority": 20},
         {"name": "fallback", "enabled": True, "priority": 999}
     ]
@@ -300,11 +301,12 @@ print(f"最后更新: {stats['last_update']}")
 
 ## 🔧 配置参数
 
-### YFinanceDataDownloader 配置
+### FinnhubDownloader 配置
 ```python
-downloader = YFinanceDataDownloader(
+downloader = FinnhubDownloader(
+    api_key="YOUR_API_KEY",  # Finnhub API密钥
     max_retries=3,           # 最大重试次数
-    base_delay=30           # 基础延迟时间（秒）
+    base_delay=5             # 基础延迟时间（秒）
 )
 ```
 

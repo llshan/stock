@@ -51,7 +51,6 @@ class StooqDataDownloader(BaseDownloader):
     def _download_stock_data_internal(
         self, symbol: str, start_date: str, end_date: Optional[str] = None
     ) -> Union[StockData, Dict[str, str]]:
-        """内部 Stooq 股票数据下载实现（命名与 yfinance 对齐）"""
         try:
             if end_date is None:
                 end_date = datetime.now().strftime('%Y-%m-%d')

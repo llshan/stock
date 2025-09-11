@@ -55,21 +55,23 @@ class FinancialRatioOperator(Operator):
                         continue
             return None
 
-        revenue = get(inc, ['Total Revenue', 'Revenue', 'Total revenue']) or 0.0
-        net_income = get(inc, ['Net Income', 'Net income', 'NetIncome']) or 0.0
+        revenue = get(inc, ['Revenue', 'Revenue, Net', 'Net sales', 'Total Revenue']) or 0.0
+        net_income = get(inc, ['Net income', 'Net Income', 'Net Income (Loss) Attributable to Parent', 'Net Income Loss']) or 0.0
         total_equity = (
             get(
                 bal,
                 [
-                    'Total Stockholder Equity',
-                    'Total Equity',
-                    'Stockholders Equity',
+                    "Total shareholders' equity",  # normalized to straight quote
+                    "Stockholders' Equity Attributable to Parent", 
+                    "Stockholders Equity",
+                    "Total Stockholder Equity", 
+                    "Total Equity",
                 ],
             )
             or 0.0
         )
-        total_assets = get(bal, ['Total Assets']) or 0.0
-        total_liab = get(bal, ['Total Liab', 'Total Liabilities']) or 0.0
+        total_assets = get(bal, ['Total assets', 'Assets', 'Total Assets']) or 0.0
+        total_liab = get(bal, ['Total liabilities', 'Liabilities', 'Total Liab', 'Total Liabilities']) or 0.0
 
         ratios: Dict[str, Any] = {}
         if revenue > 0:
@@ -85,7 +87,7 @@ class FinancialRatioOperator(Operator):
             if 'Close' in ctx.data.columns and len(ctx.data)
             else None
         )
-        shares = get(bal, ['Common Shares Outstanding', 'Shares Outstanding'])
+        shares = get(bal, ['Common stock, shares outstanding (in shares)', 'Common stock, shares issued (in shares)', 'Weighted-average shares outstanding (in shares)', 'Common Shares Outstanding', 'Shares Outstanding'])
         if price is not None and shares and shares > 0 and net_income:
             eps = net_income / shares
             if eps != 0:

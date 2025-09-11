@@ -28,7 +28,6 @@ check_untyped_defs = true
 [[tool.mypy.overrides]]
 module = [
 "pandas", "pandas.*",
-"yfinance", "yfinance.",
 "pandas_datareader", "pandas_datareader.*",
 "utils.*",
 ]

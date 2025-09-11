@@ -10,8 +10,7 @@ from .data_service import DataService
 from .downloaders import (
     BaseDownloader,
     StooqDataDownloader,
-    YFinanceDataDownloader,
-    TwelveDataDownloader,
+    FinnhubDownloader,
 )
 
 # 数据模型
@@ -36,9 +35,8 @@ __all__ = [
     'create_storage',
     'SQLiteStorage',
     # 下载器（底层）
-    'YFinanceDataDownloader',
     'StooqDataDownloader',
-    'TwelveDataDownloader',
+    'FinnhubDownloader',
     'BaseDownloader',
     # 数据模型
     'StockData',

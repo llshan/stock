@@ -23,16 +23,12 @@ class DownloaderConfig:
     base_delay: int = 30
     timeout: int = 120
     rate_limit_delay: float = 1.0
-    # 混合策略阈值：距离上次更新超过多少天使用 yfinance，否则使用 stooq
-    hybrid_threshold_days: int = 100
     # 财务刷新阈值（天）：距离最近财报期超过该天数则重新抓取财务
     financial_refresh_days: int = 90
-    # yfinance 限流/重试/信息获取策略
-    yfinance_min_interval_s: float = 0.8
-    yfinance_retry_total: int = 5
-    yfinance_backoff_factor: float = 1.5
-    strict_yfinance_meta_check: bool = False
-    yfinance_use_fast_info: bool = True
+    # 股票增量更新阈值（天）：距离最新股票数据超过该天数则使用批量下载而非增量
+    stock_incremental_threshold_days: int = 100
+    # 财务数据下载器：目前仅支持 'finnhub'
+    financial_downloader: str = 'finnhub'
 
 
 @dataclass
@@ -78,7 +74,7 @@ class DataServiceConfig:
 
     # 基础配置
     default_start_date: str = "2000-01-01"
-    default_data_source: str = "hybrid"  # hybrid, yfinance, stooq
+    default_data_source: str = "stooq"  # 统一使用 stooq 进行价格数据下载
 
     # 子配置
     downloader: DownloaderConfig = field(default_factory=DownloaderConfig)
@@ -122,6 +118,12 @@ class DataServiceConfig:
         )
         config.downloader.timeout = int(
             os.getenv('DATA_SERVICE_TIMEOUT', config.downloader.timeout)
+        )
+        config.downloader.financial_downloader = os.getenv(
+            'DATA_SERVICE_FINANCIAL_DOWNLOADER', config.downloader.financial_downloader
+        )
+        config.downloader.stock_incremental_threshold_days = int(
+            os.getenv('DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS', config.downloader.stock_incremental_threshold_days)
         )
 
         # 批量配置

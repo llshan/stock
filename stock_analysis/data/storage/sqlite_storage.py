@@ -110,19 +110,48 @@ class SQLiteStorage(BaseStorage):
         )
         """
 
-        # 财务报表数据表
-        financial_statements_table = """
-        CREATE TABLE IF NOT EXISTS financial_statements (
+        # 损益表数据
+        income_statement_table = """
+        CREATE TABLE IF NOT EXISTS income_statement (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT,
-            statement_type TEXT,
             period TEXT,
-            data TEXT,
+            metric_name TEXT,
+            metric_value REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (symbol) REFERENCES stocks (symbol),
-            UNIQUE(symbol, statement_type, period)
+            UNIQUE(symbol, period, metric_name)
         )
         """
+
+        # 资产负债表数据  
+        balance_sheet_table = """
+        CREATE TABLE IF NOT EXISTS balance_sheet (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            period TEXT,
+            metric_name TEXT,
+            metric_value REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (symbol) REFERENCES stocks (symbol),
+            UNIQUE(symbol, period, metric_name)
+        )
+        """
+
+        # 现金流量表数据
+        cash_flow_table = """
+        CREATE TABLE IF NOT EXISTS cash_flow (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol TEXT,
+            period TEXT,
+            metric_name TEXT,
+            metric_value REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (symbol) REFERENCES stocks (symbol),
+            UNIQUE(symbol, period, metric_name)
+        )
+        """
+
 
         # 下载日志表
         download_logs_table = """
@@ -141,7 +170,9 @@ class SQLiteStorage(BaseStorage):
         tables = [
             stocks_table,
             stock_prices_table,
-            financial_statements_table,
+            income_statement_table,
+            balance_sheet_table,
+            cash_flow_table,
             download_logs_table,
         ]
 
@@ -151,7 +182,12 @@ class SQLiteStorage(BaseStorage):
         # 创建索引提高查询性能
         indexes = [
             "CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol_date ON stock_prices (symbol, date)",
-            "CREATE INDEX IF NOT EXISTS idx_financial_symbol_type ON financial_statements (symbol, statement_type)",
+            "CREATE INDEX IF NOT EXISTS idx_income_statement_symbol_period ON income_statement (symbol, period)",
+            "CREATE INDEX IF NOT EXISTS idx_balance_sheet_symbol_period ON balance_sheet (symbol, period)",
+            "CREATE INDEX IF NOT EXISTS idx_cash_flow_symbol_period ON cash_flow (symbol, period)",
+            "CREATE INDEX IF NOT EXISTS idx_income_statement_metric_name ON income_statement (metric_name)",
+            "CREATE INDEX IF NOT EXISTS idx_balance_sheet_metric_name ON balance_sheet (metric_name)",
+            "CREATE INDEX IF NOT EXISTS idx_cash_flow_metric_name ON cash_flow (metric_name)",
             "CREATE INDEX IF NOT EXISTS idx_download_logs_symbol ON download_logs (symbol)",
         ]
 
@@ -188,7 +224,9 @@ class SQLiteStorage(BaseStorage):
             required = [
                 'stocks',
                 'stock_prices',
-                'financial_statements',
+                'income_statement',
+                'balance_sheet', 
+                'cash_flow',
                 'download_logs',
             ]
             placeholders = ",".join(["?"] * len(required))
@@ -392,16 +430,47 @@ class SQLiteStorage(BaseStorage):
                 description=basic_df.iloc[0]['description'] or "",
             )
 
-            # 获取财务报表
-            financial_sql = (
-                "SELECT statement_type, period, data FROM financial_statements WHERE symbol = ?"
-            )
-            financial_df = pd.read_sql_query(financial_sql, self.connection, params=[symbol])
-
+            # 从独立的财务表获取数据并构建FinancialStatement对象
             statements = {}
-            for _, row in financial_df.iterrows():
-                stmt_data = json.loads(row['data'])
-                statements[row['statement_type']] = FinancialStatement.from_dict(stmt_data)
+            
+            # 处理三个财务报表类型
+            statement_tables = {
+                'income_statement': 'income_statement',
+                'balance_sheet': 'balance_sheet', 
+                'cash_flow': 'cash_flow'
+            }
+            
+            for stmt_type, table_name in statement_tables.items():
+                try:
+                    # 获取该表的所有数据
+                    sql = f"SELECT period, metric_name, metric_value FROM {table_name} WHERE symbol = ? ORDER BY period DESC"
+                    df = pd.read_sql_query(sql, self.connection, params=[symbol])
+                    
+                    if not df.empty:
+                        # 重构数据为FinancialStatement格式
+                        periods = sorted(df['period'].unique(), reverse=True)
+                        items = {}
+                        
+                        for metric_name in df['metric_name'].unique():
+                            metric_data = df[df['metric_name'] == metric_name]
+                            values = []
+                            for period in periods:
+                                period_data = metric_data[metric_data['period'] == period]
+                                if not period_data.empty:
+                                    values.append(period_data.iloc[0]['metric_value'])
+                                else:
+                                    values.append(None)
+                            items[metric_name] = values
+                        
+                        statements[stmt_type] = FinancialStatement(
+                            statement_type=stmt_type,
+                            periods=periods,
+                            items=items
+                        )
+                        
+                except Exception as e:
+                    self.logger.warning(f"获取{stmt_type}数据失败: {e}")
+                    continue
 
             return FinancialData(
                 symbol=symbol,
@@ -436,12 +505,132 @@ class SQLiteStorage(BaseStorage):
             self.logger.error(f"❌ 获取最后更新日期失败 {symbol}: {e}")
             return None
 
+    def get_financial_metrics(
+        self, 
+        symbol: str, 
+        statement_type: Optional[str] = None,
+        period: Optional[str] = None,
+        metric_name: Optional[str] = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取财务指标数据
+        
+        Args:
+            symbol: 股票代码
+            statement_type: 报表类型（income_statement, balance_sheet, cash_flow）
+            period: 报告期
+            metric_name: 指标名称
+            
+        Returns:
+            包含财务指标数据的DataFrame
+        """
+        self._check_connection("get_financial_metrics")
+        try:
+            conditions = ["symbol = ?"]
+            params = [symbol]
+            
+            if statement_type:
+                conditions.append("statement_type = ?")
+                params.append(statement_type)
+                
+            if period:
+                conditions.append("period = ?")
+                params.append(period)
+                
+            if metric_name:
+                conditions.append("metric_name = ?")
+                params.append(metric_name)
+            
+            where_clause = " AND ".join(conditions)
+            sql = f"""
+            SELECT symbol, statement_type, period, metric_name, metric_value, created_at
+            FROM financial_metrics 
+            WHERE {where_clause}
+            ORDER BY period DESC, statement_type, metric_name
+            """
+            
+            df = pd.read_sql_query(sql, self.connection, params=params)
+            return df if not df.empty else None
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取财务指标失败 {symbol}: {e}")
+            return None
+
+    def get_statement_metrics(
+        self, 
+        symbol: str,
+        statement_type: str,
+        period: Optional[str] = None,
+        metric_name: Optional[str] = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        从独立的报表表中获取财务指标数据
+        
+        Args:
+            symbol: 股票代码
+            statement_type: 报表类型（income_statement, balance_sheet, cash_flow）
+            period: 报告期
+            metric_name: 指标名称
+            
+        Returns:
+            包含财务指标数据的DataFrame
+        """
+        self._check_connection("get_statement_metrics")
+        
+        # 确定表名
+        table_map = {
+            'income_statement': 'income_statement',
+            'balance_sheet': 'balance_sheet', 
+            'cash_flow': 'cash_flow'
+        }
+        
+        table_name = table_map.get(statement_type)
+        if not table_name:
+            self.logger.error(f"未知的报表类型: {statement_type}")
+            return None
+            
+        try:
+            conditions = ["symbol = ?"]
+            params = [symbol]
+            
+            if period:
+                conditions.append("period = ?")
+                params.append(period)
+                
+            if metric_name:
+                conditions.append("metric_name = ?")
+                params.append(metric_name)
+            
+            where_clause = " AND ".join(conditions)
+            sql = f"""
+            SELECT symbol, period, metric_name, metric_value, created_at
+            FROM {table_name}
+            WHERE {where_clause}
+            ORDER BY period DESC, metric_name
+            """
+            
+            df = pd.read_sql_query(sql, self.connection, params=params)
+            return df if not df.empty else None
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取{statement_type}指标失败 {symbol}: {e}")
+            return None
+
     def get_last_financial_period(self, symbol: str) -> Optional[str]:
         """获取该股票财务报表的最近期间（period）"""
         self._check_connection("get_last_financial_period")
         try:
-            sql = "SELECT MAX(period) FROM financial_statements WHERE symbol = ?"
-            result = self.cursor.execute(sql, (symbol,)).fetchone()  # type: ignore
+            # 从三个独立表中获取最新期间
+            sql = """
+            SELECT MAX(period) as max_period FROM (
+                SELECT MAX(period) as period FROM income_statement WHERE symbol = ?
+                UNION ALL
+                SELECT MAX(period) as period FROM balance_sheet WHERE symbol = ?
+                UNION ALL
+                SELECT MAX(period) as period FROM cash_flow WHERE symbol = ?
+            )
+            """
+            result = self.cursor.execute(sql, (symbol, symbol, symbol)).fetchone()  # type: ignore
             return result[0] if result and result[0] else None
         except Exception as e:
             self.logger.error(f"❌ 获取最近财务期间失败 {symbol}: {e}")
@@ -520,12 +709,6 @@ class SQLiteStorage(BaseStorage):
         """存储财务报表"""
         self._check_connection("_store_financial_statement")
         for period in statement.periods:
-            sql = """
-            INSERT OR REPLACE INTO financial_statements
-            (symbol, statement_type, period, data)
-            VALUES (?, ?, ?, ?)
-            """
-
             # 获取该期间的数据
             period_data = {}
             for item_name, values in statement.items.items():
@@ -536,15 +719,47 @@ class SQLiteStorage(BaseStorage):
                 except (ValueError, IndexError):
                     period_data[item_name] = None
 
-            stmt_data = {
-                'statement_type': stmt_type,
-                'periods': [period],
-                'items': {k: [v] for k, v in period_data.items()},
-            }
-
-            self.cursor.execute(sql, (symbol, stmt_type, period, json.dumps(stmt_data)))  # type: ignore
+            # 存储到独立的报表表
+            self._store_to_statement_table(stmt_type, symbol, period, period_data)
 
         self.connection.commit()  # type: ignore
+
+    def _store_to_statement_table(
+        self, stmt_type: str, symbol: str, period: str, metrics: Dict[str, Optional[float]]
+    ) -> None:
+        """存储财务指标到对应的独立报表表中"""
+        self._check_connection("_store_to_statement_table")
+        
+        # 确定目标表名
+        table_map = {
+            'income_statement': 'income_statement',
+            'balance_sheet': 'balance_sheet', 
+            'cash_flow': 'cash_flow'
+        }
+        
+        table_name = table_map.get(stmt_type)
+        if not table_name:
+            self.logger.warning(f"未知的报表类型: {stmt_type}")
+            return
+            
+        sql = f"""
+        INSERT OR REPLACE INTO {table_name}
+        (symbol, period, metric_name, metric_value)
+        VALUES (?, ?, ?, ?)
+        """
+        
+        for metric_name, metric_value in metrics.items():
+            # 只存储有效的数值
+            if metric_value is not None:
+                try:
+                    # 确保数值是float类型
+                    float_value = float(metric_value)
+                    self.cursor.execute(  # type: ignore
+                        sql, (symbol, period, metric_name, float_value)
+                    )
+                except (ValueError, TypeError):
+                    # 跳过无法转换为数值的项目
+                    continue
 
     def _log_download(
         self,

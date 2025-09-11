@@ -3,10 +3,13 @@
 数据服务层（DataService）
 
 职责：
-- 协调下载器与存储层，提供统一的数据获取/存储入口
+- 协调多个下载器与存储层，提供统一的数据获取/存储入口
 - 封装增量下载、批量下载与数据质量评估流程
 
 说明：
+- 混合下载策略：
+  * 股票价格数据：批量下载用Stooq，增量更新用Finnhub
+  * 财务数据：全部使用Finnhub
 - 模块侧重于数据流转（下载→规范化→存储）
 - 依赖 storage 与 downloaders 子模块
 """
@@ -17,7 +20,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from .config import DataServiceConfig
 from .downloaders.stooq import StooqDataDownloader
-from .downloaders.twelvedata import TwelveDataDownloader
+from .downloaders.finnhub import FinnhubDownloader
 from .models import (
     FinancialData,
     StockData,
@@ -40,15 +43,24 @@ class DataService:
 
         Args:
             storage: 存储实例，默认使用SQLite
-            注：价格数据一律走 Hybrid 下载器；财务数据走 yfinance
+            config: 数据服务配置，包含下载器选择
         """
         self.storage: BaseStorage = storage or create_storage('sqlite')
         self.config = config or DataServiceConfig()
-        # 下载器实例（使用 Twelve Data 替代 yfinance）
-        self.twelvedata_downloader = TwelveDataDownloader()
+        # 价格数据：批量用Stooq，增量用Finnhub
         self.stooq_downloader = StooqDataDownloader()
+        self.finnhub_downloader = FinnhubDownloader()
 
         self.logger = logging.getLogger(__name__)
+
+    def _get_financial_downloader(self):
+        """根据配置获取财务数据下载器"""
+        downloader_type = self.config.downloader.financial_downloader.lower()
+        if downloader_type == 'finnhub':
+            return self.finnhub_downloader
+        else:
+            self.logger.warning(f"未知的财务下载器类型: {downloader_type}, 使用默认的 Finnhub")
+            return self.finnhub_downloader
 
     def get_last_update_date(self, symbol: str) -> Optional[str]:
         """
@@ -75,7 +87,7 @@ class DataService:
         self, symbol: str, start_date: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        下载并存储股票数据（统一走 Hybrid，内部已入库）
+        下载并存储股票数据（批量用Stooq，增量用Finnhub）
 
         Args:
             symbol: 股票代码
@@ -94,36 +106,49 @@ class DataService:
                 raw_last = self.storage.get_last_update_date(symbol)
             except Exception:
                 raw_last = None
+            
+            # 检查数据是否已经是最新的
+            if raw_last:
+                today = datetime.now().strftime('%Y-%m-%d')
+                if raw_last >= today:
+                    return {
+                        'success': True,
+                        'symbol': symbol,
+                        'no_new_data': True,
+                        'used_strategy': 'skip_already_current',
+                        'data_points': 0,
+                    }
+            
             actual_start = (
                 (datetime.strptime(raw_last, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
                 if raw_last
                 else (start_date or '2000-01-01')
             )
 
-            # 策略选择
+            # 混合策略：根据最新数据时间决定批量还是增量
             if raw_last is None:
+                # 首次下载，使用Stooq批量下载历史数据
                 used = 'Stooq批量历史数据'
                 data = self.stooq_downloader.download_stock_data(symbol, actual_start)
             else:
-                try:
-                    days = (datetime.now() - datetime.strptime(raw_last, '%Y-%m-%d')).days
-                except Exception:
-                    days = 9999
-                threshold = getattr(self.config.downloader, 'hybrid_threshold_days', 100)
-                if days <= threshold:
-                    used = 'twelvedata增量更新(<=阈值)'
-                    data = self.twelvedata_downloader.download_stock_data(
-                        symbol, actual_start, incremental=True, use_retry=True
-                    )
-                    # 若 Twelve Data 失败，回退到 Stooq 兜底
+                # 计算距今天数，决定是否使用增量更新
+                days_since_last = (datetime.now() - datetime.strptime(raw_last, '%Y-%m-%d')).days
+                threshold_days = getattr(self.config.downloader, 'stock_incremental_threshold_days', 100)
+                
+                if days_since_last <= threshold_days:
+                    # 在阈值内，使用增量更新（优先Finnhub）
+                    used = 'Finnhub增量更新'
+                    data = self.finnhub_downloader.download_stock_data(symbol, actual_start)
+                    
+                    # 如果Finnhub失败，回退到Stooq
                     if isinstance(data, dict) and 'error' in data:
-                        self.logger.warning(
-                            f"twelvedata 增量失败，使用 Stooq 回退: {data['error']}"
-                        )
-                        used = 'Stooq回退(增量失败)'
+                        self.logger.warning(f"Finnhub增量更新失败，回退到Stooq: {data['error']}")
+                        used = 'Stooq增量更新(Finnhub失败回退)'
                         data = self.stooq_downloader.download_stock_data(symbol, actual_start)
                 else:
-                    used = 'Stooq批量下载补全(>阈值)'
+                    # 超过阈值，使用Stooq批量重新下载
+                    used = f'Stooq批量重下载(超过{threshold_days}天阈值)'
+                    self.logger.info(f"{symbol} 最后更新距今 {days_since_last} 天，超过 {threshold_days} 天阈值，使用批量下载")
                     data = self.stooq_downloader.download_stock_data(symbol, actual_start)
 
             if isinstance(data, dict) and 'error' in data:
@@ -165,7 +190,7 @@ class DataService:
         下载并存储财务数据（带刷新阈值）。
 
         - 如果最近财报期间距今不超过阈值（默认 90 天），则跳过并返回 no_new_data。
-        - 否则使用 yfinance 下载财报并入库。
+        - 否则使用 Finnhub 下载财报并入库。
         """
         try:
             # 判定是否需要刷新
@@ -191,12 +216,16 @@ class DataService:
                     'used_strategy': 'skip_recent_financial',
                 }
 
-            fin = self.twelvedata_downloader.download_financial_data(symbol, use_retry=True)
+            downloader = self._get_financial_downloader()
+            downloader_name = self.config.downloader.financial_downloader.lower()
+            
+            fin = downloader.download_financial_data(symbol, use_retry=True)
             if isinstance(fin, dict) and 'error' in fin:
                 return {
                     'success': False,
                     'symbol': symbol,
                     'error': fin['error'],
+                    'used_strategy': f'{downloader_name}_financial_error',
                 }
 
             if isinstance(fin, FinancialData):
@@ -207,14 +236,14 @@ class DataService:
                         'success': False,
                         'symbol': symbol,
                         'error': '未获取到财务报表（返回为空）',
-                        'used_strategy': 'yfinance_financial_empty',
+                        'used_strategy': f'{downloader_name}_financial_empty',
                     }
                 self.storage.store_financial_data(symbol, fin)
                 return {
                     'success': True,
                     'symbol': symbol,
                     'statements': stmt_count,
-                    'used_strategy': 'twelvedata_financial',
+                    'used_strategy': f'{downloader_name}_financial',
                 }
 
             return {

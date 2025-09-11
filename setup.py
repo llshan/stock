@@ -21,7 +21,7 @@ if requirements_file.exists():
 else:
     requirements = [
         "pandas>=1.5.0",
-        "yfinance>=0.2.0", 
+ 
         "pandas-datareader>=0.10.0",
         "numpy>=1.21.0",
         "requests>=2.28.0",
@@ -72,6 +72,7 @@ setup(
             'stock-data=stock_analysis.cli.data_manager:main',
             'stock-analyze=stock_analysis.cli.data_analyzer:main', 
             'stock-db=stock_analysis.cli.db_print:main',
+            'financial-metrics=stock_analysis.cli.financial_metrics:main',
         ],
     },
     

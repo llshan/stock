@@ -15,7 +15,7 @@ from typing import List
 import pandas as pd
 
 from stock_analysis.data import DataService, create_storage
-from stock_analysis.data.config import get_default_watchlist
+from stock_analysis.data.config import get_default_watchlist, DataServiceConfig
 from stock_analysis.utils.logging_utils import setup_logging
 
 
@@ -25,7 +25,8 @@ def cmd_download(args: argparse.Namespace) -> int:
 
     dbp = str(Path(args.db_path))
     storage = create_storage('sqlite', db_path=dbp)
-    service = DataService(storage)
+    config = DataServiceConfig.from_env(db_path=dbp)
+    service = DataService(storage, config)
 
     # 选择股票列表
     if args.symbols:
@@ -55,7 +56,7 @@ def cmd_download(args: argparse.Namespace) -> int:
         logger.info(f"开始下载财务数据 {len(symbols)} 个")
     else:
         logger.info(
-            f"开始下载价格数据 {len(symbols)} 个，起始: {args.start_date or '自动增量'}（策略：新股Stooq全量，老股<=阈值天数用yfinance，否则Stooq）"
+            f"开始下载价格数据 {len(symbols)} 个，起始: {args.start_date or '自动增量'}（使用Stooq下载器）"
         )
 
     # 逐只下载并入库（DataService 内部自动选择来源）
