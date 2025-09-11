@@ -99,7 +99,7 @@ def get_module_info() -> dict[str, Any]:
         'features': [
             '技术指标分析 (RSI, MACD, 布林带等)',
             '财务指标分析 (ROE, 负债率, PE等)',
-            '多数据源支持 (Yahoo Finance, Stooq等)',
+            '多数据源支持 (Finnhub, Stooq等)',
             '灵活的配置管理',
             '丰富的图表生成',
         ],

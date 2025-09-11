@@ -9,8 +9,9 @@
 ## ✨ 核心特性
 
 ### 📊 数据管理
-- **多源数据获取**: 集成 Stooq 和 Finnhub 数据源
-- **可靠数据下载**: Stooq 价格数据 + Finnhub 财务数据
+- **混合下载策略**: 智能选择 Stooq(批量) 和 Finnhub(增量) 数据源
+- **100天阈值机制**: 自动判断使用增量更新还是批量下载
+- **规范化财务数据**: 分离式存储损益表、资产负债表、现金流量表
 - **数据质量评估**: 自动检测和报告数据完整性
 - **SQLite存储**: 高效的本地数据存储和管理
 
@@ -170,13 +171,22 @@ class MyCustomOperator(Operator):
 
 ```bash
 # 设置默认数据库路径
-export STOCK_DB_PATH="path/to/your/database.db"
+export DATA_SERVICE_DB_PATH="path/to/your/database.db"
+
+# 设置Finnhub API密钥
+export FINNHUB_API_KEY="your_finnhub_api_key"
+
+# 设置股票增量更新阈值（天）
+export DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS="100"
+
+# 设置财务数据下载器
+export DATA_SERVICE_FINANCIAL_DOWNLOADER="finnhub"
 
 # 设置默认关注股票列表
 export WATCHLIST="AAPL,GOOG,MSFT,TSLA"
 
 # 设置日志级别
-export LOG_LEVEL="INFO"
+export DATA_SERVICE_LOG_LEVEL="INFO"
 ```
 
 ### 配置文件
@@ -188,22 +198,26 @@ database:
   path: "database/stock_data.db"
   
 downloader:
-  hybrid_threshold_days: 100
+  stock_incremental_threshold_days: 100
   financial_refresh_days: 90
-  retry_attempts: 3
+  financial_downloader: "finnhub"
+  max_retries: 3
+  base_delay: 30
 
 analysis:
   default_period: "1y"
-  operators: ["ma", "rsi", "drop_alert"]
+  operators: ["ma", "rsi", "fin_ratios", "fin_health", "drop_alert"]
 ```
 
 ## 📊 支持的技术指标
 
 ### 当前指标
 - **移动平均线** (MA): 5日、10日、20日、50日均线
-- **相对强弱指数** (RSI): 14周期RSI
+- **相对强弱指数** (RSI): 14周期RSI，支持超买超卖信号
+- **财务比率** (fin_ratios): 净利润率、ROE、负债率、PE比率
+- **财务健康** (fin_health): 基于多指标的健康评分 (A-F等级)
 - **趋势分析**: 基于均线的趋势判断
-- **跌幅警报**: 异常波动监测
+- **跌幅警报**: 异常波动监测 (1日和7日)
 
 ### 计划指标
 - MACD (移动平均收敛散度)
@@ -324,8 +338,8 @@ cat results.json | jq '.[] | {symbol: .symbol, trend: .summary.trend}'
 
 ## 💡 常见问题
 
-### Q: 如何解决429错误？
-A: 这是API速率限制，请等待几小时后重试，或使用 `--financial-only` 跳过财务数据下载。
+### Q: 如何解决API限制错误？
+A: 系统会自动在Finnhub和Stooq之间进行回退。如遇到速率限制，请等待或配置API密钥。
 
 ### Q: 数据不完整怎么办？
 A: 使用 `stock-data query -s SYMBOL` 检查数据范围，然后重新下载：`stock-data download -s SYMBOL --start-date 2020-01-01`

@@ -6,407 +6,322 @@
 
 ### 推荐使用方式 - DataService
 ```python
-from data_service import DataService, create_storage
+from stock_analysis.data import DataService
+from stock_analysis.data.config import DataServiceConfig
 
-# 🎯 推荐：创建数据服务（价格走Stooq，财务走Finnhub）
-service = DataService(create_storage('sqlite', db_path="my_stocks.db"))
+# 创建数据服务（使用混合下载策略）
+config = DataServiceConfig.from_env()  # 从环境变量加载配置
+service = DataService(config=config)
 
-# 智能下载并入库（自动选择最佳价格数据源）
+# 智能下载并入库（自动选择最佳策略）
 result = service.download_and_store_stock_data("AAPL")
 print(f"使用策略: {result.get('used_strategy')}")
+print(f"数据点数: {result.get('data_points')}")
+
+# 下载财务数据
+financial_result = service.download_and_store_financial_data("AAPL")
 
 # 批量下载
-symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = service.batch_download_and_store(symbols, include_financial=False)
+symbols = ['AAPL', 'GOOG', 'MSFT']
+results = service.batch_download_and_store(symbols, include_financial=True)
 ```
-
-### 传统使用方式
-（已简化，建议直接使用上面的便捷函数；价格数据的自动策略已并入 DataService）
-
 
 ## 📁 模块结构
 
 ```
-data_service/
+stock_analysis/data/
 ├── __init__.py                      # 📦 包初始化和便捷API
-├── database.py                      # 💾 数据库操作层
 ├── data_service.py                  # 🏢 核心数据服务类
-├── models.py                        # 📋 数据模型定义
+├── config.py                        # ⚙️ 配置管理
+├── models/                          # 📋 数据模型定义
+│   ├── __init__.py
+│   ├── base_models.py               # 基础模型
+│   ├── price_models.py              # 价格数据模型  
+│   ├── financial_models.py          # 财务数据模型
+│   └── quality_models.py            # 质量评估模型
 ├── downloaders/                     # 📥 下载器模块
-│   ├── __init__.py                  # 下载器包初始化
+│   ├── __init__.py                  
 │   ├── base.py                      # 🏗️ 下载器抽象基类
-│   ├── finnhub.py                   # 📈 Finnhub 财务数据下载器  
-│   ├── stooq.py                     # 📊 Stooq 数据下载器
-│   └── （已合并）                    # 下载策略已并入 DataService
-└── README.md                        # 📄 本文件
+│   ├── finnhub.py                   # 📈 Finnhub API下载器
+│   └── stooq.py                     # 📊 Stooq数据下载器
+├── storage/                         # 💾 存储层
+│   ├── __init__.py
+│   ├── base.py                      # 存储抽象基类
+│   └── sqlite_storage.py            # SQLite存储实现
+├── quality.py                       # 📏 数据质量评估
+└── exceptions.py                    # ❌ 异常定义
 ```
 
 ## 🧩 核心组件功能
 
-### 🏗️ `downloaders/base.py` - 下载器基础框架
-**抽象基类，定义统一的下载器接口**
-- `BaseDownloader`: 所有下载器的抽象基类
-- 统一的重试机制和错误处理
-- 标准化的日志记录
-- 频率限制和退避策略
+### 🏢 `data_service.py` - 核心数据服务
+**混合下载策略的中央协调服务**
+- 智能选择数据源：100天阈值判断增量 vs 批量
+- 自动回退机制：Finnhub失败时回退到Stooq
+- 统一的错误处理和日志记录
 
-**核心方法:**
-```python
-def _retry_with_backoff(func, symbol)  # 带退避的重试机制
-def _is_api_error_retryable(error)     # 判断错误是否可重试
+**混合下载策略:**
+```
+股票数据策略:
+├── 首次下载 → Stooq批量历史数据
+├── ≤100天 → Finnhub增量更新 (失败时回退Stooq)
+└── >100天 → Stooq批量重新下载
+
+财务数据策略:
+└── 全部使用Finnhub (带90天刷新阈值)
 ```
 
-### 📈 `downloaders/finnhub.py` - Finnhub 财务数据下载器
-**基于Finnhub API的财务数据下载器**
-- `FinnhubDownloader`: 继承自BaseDownloader
-- 专注于财务数据下载
-- 返回结构化的DataClass对象
-- 支持多种财务报表
-
-**主要功能:**
-- 财务报表 (损益表、资产负债表、现金流)
-- 财务指标计算
-- 多期数据获取
+### 📈 `downloaders/finnhub.py` - Finnhub API下载器
+**专业级财务和价格数据下载器**
+- 支持股票价格数据 (`/stock/candle`)
+- 财务报表数据 (`/stock/financials-reported`, `/stock/profile2`)
+- 自动重试和错误处理
 - API密钥认证
 
-### 📊 `downloaders/stooq.py` - Stooq 数据下载器  
-**专用于长期历史数据下载**
-- `StooqDataDownloader`: 继承自BaseDownloader
-- 适合大跨度历史数据补齐
-- 长期历史数据获取
-- 与Finnhub形成互补
-
 **主要功能:**
-- 大批量历史数据下载
-- 长期价格趋势数据
-- 数据完整性验证
-- 格式标准化处理
+- 日线价格数据下载
+- 综合财务报表 (损益表、资产负债表、现金流)
+- 公司基本信息
+- 多期财务数据处理
 
-### 🔄 自动策略下载
-**DataService 内置：按是否新股与更新时间选择数据源，并直接入库**
-- 新股：Stooq 全量
-- 价格数据：使用 Stooq 获取历史价格数据
-- 财务数据：使用 Finnhub 获取财务报表和指标
+### 📊 `downloaders/stooq.py` - Stooq数据下载器  
+**专用于历史价格数据下载**
+- 免费且稳定的历史数据源
+- 适合大批量历史数据下载
+- 长期价格趋势数据获取
+- CSV格式数据处理
 
-### 💾 `database.py` - 数据持久化层
-**统一的数据库访问接口**
-- `StockDatabase`: 数据库操作封装
-- 支持SQLite和PostgreSQL
-- 事务管理和连接池
-- 数据完整性约束
+### 💾 `storage/sqlite_storage.py` - SQLite存储层
+**规范化的数据存储实现**
+- 分离式财务数据存储 (三张独立表)
+- 完整的CRUD操作支持
+- 事务管理和数据完整性
+- 查询优化和索引
 
-**核心功能:**
-- 股票价格数据存储
-- 财务数据存储  
-- 综合数据存储
-- 下载日志记录
-- 数据查询和统计
+**数据库表结构:**
+```sql
+-- 股票基本信息
+stocks (symbol, company_name, sector, ...)
 
-### 📋 `models.py` - 数据模型层
-**类型安全的数据结构定义**
-- 使用Python DataClass
-- 完整的类型注解
-- 数据验证和序列化
+-- 价格数据
+stock_prices (symbol, date, open, high, low, close, volume, ...)
 
-**主要模型:**
-```python
-@dataclass
-class PriceData:           # 价格数据
-class StockData:           # 股票数据集合
-class FinancialData:       # 财务数据
-class ComprehensiveData:   # 综合数据
-class DataQuality:         # 数据质量评估
-class DownloadErrorInfo:   # 下载错误信息
+-- 财务数据 (分离存储)
+income_statement (symbol, period, revenue, net_income, ...)
+balance_sheet (symbol, period, total_assets, equity, ...)  
+cash_flow (symbol, period, operating_cf, free_cf, ...)
+
+-- 规范化指标表 (用于分析)
+income_statement_metrics, balance_sheet_metrics, cash_flow_metrics
 ```
 
-### 🏢 `data_service.py` - 核心数据服务
-**协调各组件的中央服务**
-- `DataService`: 统一的数据服务接口
-- 协调下载器和数据库
-- 业务逻辑封装
-- 批量操作支持
+### ⚙️ `config.py` - 配置管理
+**集中化的配置管理**
+- 环境变量支持
+- 下载器参数配置
+- 阈值和策略配置
 
-**核心方法:**
+**主要配置项:**
 ```python
-def download_and_store_stock_data()           # 下载并存储股票数据
-def download_and_store_financial_data()       # 下载并存储财务数据
-def batch_download_and_store()                # 批量下载存储（可包含财务）
-def get_existing_symbols()                    # 获取已有股票列表
+# 关键配置参数
+stock_incremental_threshold_days: int = 100  # 增量更新阈值
+financial_refresh_days: int = 90             # 财务数据刷新阈值  
+financial_downloader: str = 'finnhub'       # 财务数据下载器
+max_retries: int = 3                         # 最大重试次数
+base_delay: int = 30                         # 基础延迟时间
 ```
 
-## 🔗 组件协作关系
+## 🔧 环境变量配置
 
-```mermaid
-graph TD
-    A[DataService 核心服务] --> B[FinnhubDownloader]
-    A --> C[StooqDataDownloader] 
-    A --> D[数据整合（内置）]
-    A --> E[StockDatabase]
-    
-    B --> F[BaseDownloader]
-    C --> F
-    D --> B
-    D --> C
-    
-    B --> G[Models 数据模型]
-    C --> G
-    D --> G
-    E --> G
-    
-    H[Analyzer 分析层] --> A
-    I[应用程序] --> A
+```bash
+# 必需配置
+export FINNHUB_API_KEY="your_finnhub_api_key"
+
+# 可选配置
+export DATA_SERVICE_DB_PATH="database/stock_data.db"
+export DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS="100"
+export DATA_SERVICE_FINANCIAL_DOWNLOADER="finnhub"
+export DATA_SERVICE_FINANCIAL_REFRESH_DAYS="90"
+export DATA_SERVICE_MAX_RETRIES="3"
+export DATA_SERVICE_LOG_LEVEL="INFO"
 ```
 
 ## 📋 API 参考
 
-### 🎯 推荐API
-
-使用 DataService 作为统一入口
+### 基础使用
 ```python
-from data_service import DataService, create_storage
-service = DataService(create_storage('sqlite', db_path="stocks.db"))
-res1 = service.download_and_store_stock_data("AAPL")
-resn = service.batch_download_and_store(['AAPL','GOOGL','MSFT'], include_financial=False)
+from stock_analysis.data import DataService
+from stock_analysis.data.config import DataServiceConfig
+
+# 1. 基本初始化
+service = DataService()
+
+# 2. 带配置初始化
+config = DataServiceConfig.from_env()
+service = DataService(config=config)
+
+# 3. 自定义配置
+config = DataServiceConfig(
+    downloader=DownloaderConfig(
+        stock_incremental_threshold_days=50,
+        financial_refresh_days=60
+    )
+)
+service = DataService(config=config)
 ```
 
-（已移除 `create_simple_downloader` 与 `create_data_manager` 便捷入口）
-
-### 🔧 高级用法
-
-#### 1. 自动策略下载（DataService）
+### 数据下载
 ```python
-from data_service import DataService, create_storage
-storage = create_storage('sqlite', db_path="stocks.db")
-service = DataService(storage)
+# 下载股票价格数据
 result = service.download_and_store_stock_data('AAPL')
-```
+print(f"策略: {result['used_strategy']}")
+print(f"数据点: {result['data_points']}")
 
-#### 2. 数据服务直接使用
-```python
-from data_service import DataService, create_storage
+# 下载财务数据  
+financial_result = service.download_and_store_financial_data('AAPL')
 
-# 创建服务组件（价格数据自动选择来源）
-storage = create_storage('sqlite', db_path="stocks.db")
-service = DataService(storage)
-
-# 批量下载和存储
-symbols = ['AAPL', 'GOOGL', 'MSFT']
-results = service.batch_download_and_store(symbols, include_financial=True)
-```
-
-#### 3. 直接使用下载器
-```python
-from data_service import FinnhubDownloader, StooqDataDownloader
-
-# Finnhub 下载器
-finnhub_downloader = FinnhubDownloader()
-stock_data = yf_downloader.download_stock_data("AAPL")
-financial_data = yf_downloader.download_financial_data("AAPL")
-
-# Stooq 下载器（适合大批量历史数据）
-stooq_downloader = StooqDataDownloader()
-historical_data = stooq_downloader.download_stock_data("AAPL", "2000-01-01")
-```
-
-#### 4. 数据模型使用
-```python
-from data_service import StockData, PriceData, DataQuality
-
-# 创建价格数据
-price_data = PriceData(
-    dates=["2023-01-01", "2023-01-02"],
-    open=[150.0, 152.0],
-    high=[155.0, 154.0], 
-    low=[149.0, 151.0],
-    close=[152.0, 153.0],
-    volume=[1000000, 1100000],
-    adj_close=[152.0, 153.0]
+# 批量下载 (推荐)
+symbols = ['AAPL', 'GOOG', 'MSFT']
+results = service.batch_download_and_store(
+    symbols, 
+    include_financial=True,
+    start_date='2020-01-01'
 )
 
-# 数据序列化和反序列化
-data_dict = price_data.to_dict()
-restored_data = PriceData.from_dict(data_dict)
+# 检查批量结果
+print(f"成功: {results['successful']}/{results['total']}")
+for symbol, result in results['results'].items():
+    if result['success']:
+        print(f"✅ {symbol}: {result.get('used_strategy', 'N/A')}")
+    else:
+        print(f"❌ {symbol}: {result.get('error', 'Unknown error')}")
 ```
 
-## 🎯 高级特性
-
-（当前混合下载器为简化实现，暂不支持自定义策略插拔）
-
-### 数据质量监控
+### 数据查询
 ```python
-from data_service import DataService, create_storage
+# 获取已有股票列表
+symbols = service.get_existing_symbols()
 
-storage = create_storage('sqlite', db_path="stocks.db")
-service = DataService(storage)
+# 获取最后更新日期  
+last_date = service.get_last_update_date('AAPL')
 
-# 价格与财务分别处理；质量评估请按需单独计算
-stock_res = service.download_and_store_stock_data("AAPL")
-fin_res = service.download_and_store_financial_data("AAPL")
-print(stock_res)
-print(fin_res)
+# 数据库统计 (通过storage)
+stats = service.storage.get_database_stats()
 ```
 
-### 配置自定义
+## 🎯 混合下载策略详解
+
+### 策略决策流程
 ```python
-# 配置混合下载器策略
-config = {
-    "strategies": [
-        {"name": "finnhub", "enabled": True, "priority": 10},
-        {"name": "stooq", "enabled": False, "priority": 20},
-        {"name": "fallback", "enabled": True, "priority": 999}
-    ]
-}
-
-# 简化版不支持策略配置
+def determine_download_strategy(symbol, last_update_date):
+    if last_update_date is None:
+        return "Stooq批量历史数据"  # 首次下载
+    
+    days_since_last = calculate_days(last_update_date)
+    threshold = config.stock_incremental_threshold_days  # 默认100天
+    
+    if days_since_last <= threshold:
+        return "Finnhub增量更新"     # 近期数据，增量更新
+    else:
+        return "Stooq批量重新下载"   # 数据过旧，批量更新
 ```
 
-## 🛠️ 开发和扩展
+### 自动回退机制
+```python
+# Finnhub增量更新失败时自动回退
+try:
+    data = finnhub_downloader.download_stock_data(symbol, start_date)
+    strategy = "Finnhub增量更新"
+except FinnhubAPIError:
+    data = stooq_downloader.download_stock_data(symbol, start_date)  
+    strategy = "Stooq增量更新(Finnhub失败回退)"
+```
 
-### 添加新的数据源
+## 🏗️ 扩展开发
+
+### 添加新数据源
 1. 继承 `BaseDownloader`
-2. 实现必要的抽象方法
-3. 返回标准化的数据模型
-4. 在 `HybridDataDownloader` 中添加对应策略（当前简化实现，暂不支持策略插拔）
+2. 实现必需的抽象方法
+3. 在DataService中集成新下载器
 
-### 自定义数据模型
-1. 在 `models.py` 中定义新的 DataClass
-2. 实现 `to_dict()` 和 `from_dict()` 方法
-3. 在相关下载器中使用新模型
-4. 更新数据库存储逻辑
-
-### 性能优化建议
-- 使用 `batch_download_and_store()` 进行批量操作
-- 启用增量下载减少数据传输
-- 合理设置重试参数和延迟时间
-- 使用数据库连接池提高并发性能
-
-## 📊 监控和日志
-
-### 下载日志
 ```python
-# 查询下载日志
-logs = database.get_download_logs(symbol="AAPL", limit=10)
-for log in logs:
-    print(f"{log['timestamp']}: {log['data_type']} - {log['status']}")
+from stock_analysis.data.downloaders.base import BaseDownloader
+
+class NewAPIDownloader(BaseDownloader):
+    def download_stock_data(self, symbol, start_date=None, end_date=None):
+        # 实现下载逻辑
+        pass
+        
+    def download_financial_data(self, symbol):
+        # 实现财务数据下载
+        pass
 ```
 
-### 数据统计
+### 自定义存储后端
 ```python
-# 获取数据库统计信息
-stats = database.get_database_stats()
-print(f"总股票数: {stats['total_symbols']}")
-print(f"总数据点: {stats['total_data_points']}")
-print(f"最后更新: {stats['last_update']}")
+from stock_analysis.data.storage.base import BaseStorage
+
+class CustomStorage(BaseStorage):
+    def store_stock_data(self, symbol, data):
+        # 实现存储逻辑
+        pass
 ```
 
-## 🔧 配置参数
+## 🛡️ 错误处理和最佳实践
 
-### FinnhubDownloader 配置
+### 错误处理
 ```python
-downloader = FinnhubDownloader(
-    api_key="YOUR_API_KEY",  # Finnhub API密钥
-    max_retries=3,           # 最大重试次数
-    base_delay=5             # 基础延迟时间（秒）
-)
+# 总是检查返回结果
+result = service.download_and_store_stock_data("INVALID_SYMBOL")
+if not result.get('success'):
+    print(f"下载失败: {result.get('error')}")
+    # 处理错误...
 ```
 
-### HybridDataDownloader 配置  
+### 批量操作最佳实践
 ```python
-manager = HybridDataDownloader(
-    database=database,
-    max_retries=5,          # 最大重试次数
-    base_delay=30           # 基础延迟时间
-)
+# ✅ 推荐：批量操作
+results = service.batch_download_and_store(symbols, include_financial=True)
+
+# ❌ 避免：循环单个操作
+for symbol in symbols:
+    service.download_and_store_stock_data(symbol)
+    service.download_and_store_financial_data(symbol)  # 效率低
 ```
 
-### DataService 配置
+### 资源管理
 ```python
-# 价格数据统一走 Hybrid，无需显式传入下载器
-from data_service import DataService, create_storage
-service = DataService(create_storage('sqlite', db_path="stocks.db"))
+# 记得关闭服务释放资源
+try:
+    service = DataService()
+    # ... 使用服务
+finally:
+    service.close()
 ```
 
-## 🚦 最佳实践
+## 📊 监控和调试
 
-### ⭐ 推荐使用模式
-
-1. **🎯 首选统一入口**: 
-   ```python
-   # 推荐：简单直接
-   service = DataService(create_storage('sqlite', db_path="stocks.db"))
-   
-   # 而不是：手动组装 Hybrid
-   storage = create_storage('sqlite', db_path="stocks.db")
-   manager = HybridDataDownloader(storage)
-   ```
-
-2. **📦 批量操作优先（服务层）**: 
-   ```python
-   # 推荐：批量下载
-   results = service.batch_download_and_store(['AAPL','GOOGL','MSFT'], include_financial=False)
-   
-   # 避免：逐个下载
-   for symbol in symbols:
-       service.download_and_store_stock_data(symbol)
-   ```
-
-3. **🔧 配置传递**: 
-   - 如需自定义下载重试/延迟，建议直接在下载器层配置后注入到 DataService/Hybrid（当前简化实现默认配置已满足日常使用）。
-
-### 🛡️ 错误处理
-
+### 日志配置
 ```python
-# 始终检查结果
+import logging
+logging.basicConfig(level=logging.INFO)
+
+# 查看详细的下载过程
+service = DataService()
 result = service.download_and_store_stock_data("AAPL")
-if result.get('success'):
-    print(f"成功，策略: {result.get('used_strategy')}")
-else:
-    print(f"失败: {result.get('error')}")
+# 日志输出: [INFO] 📈 开始下载并存储 AAPL 股票数据
+# 日志输出: [INFO] 使用策略: Finnhub增量更新
 ```
 
-### ⚡ 性能优化
-
-1. **启用增量下载**: 减少数据传输量
-2. **合理设置重试参数**: 避免过度重试
-3. **使用策略优先级**: 让系统选择最优数据源
-4. **及时关闭资源**: `service.close()` 释放数据库连接
-
-### 🔍 监控数据质量
-
+### 配置检查
 ```python
-# 手动评估质量（可选）：请基于已存储数据读取并使用 quality.assess_data_quality()
-# 例如：读取 stock 与 financial 数据后，调用 assess_data_quality(stock, financial, start_date)
+# 查看当前配置
+config = DataServiceConfig.from_env()
+print(f"增量阈值: {config.downloader.stock_incremental_threshold_days}天")
+print(f"财务下载器: {config.downloader.financial_downloader}")
+print(f"数据库路径: {config.database.db_path}")
 ```
-
-## 📈 输出和存储
-
-### 数据库表结构（简化方案）
-- `stock_prices`：价格数据（逐日规范化）
-- `price_bars`：价格视图（等同 `stock_prices`，便于统一命名）
-- `financial_statements`：财报（每期一行，data 为 JSON）
-- `download_logs`：下载与质量日志（details JSON 可存质量评估）
-- `symbols`：基本信息
-
-### 质量评估存储
-数据质量（DataQuality）作为下载日志的一部分写入：
-- `download_logs.download_type = 'quality'`
-- `details` JSON 存储质量字段（completeness、quality_grade、issues 等）
-
-### 数据格式
-所有数据都以标准化的 DataClass 读写，确保:
-- 类型安全
-- 数据一致性
-- 易于序列化和反序列化
- 
-
-## 🆕 最新更新
-
-### v2.0 重大更新（校正）
-- 🗑️ 移除便捷API: `create_data_manager()`，统一通过 `DataService + create_storage`
-- 🏗️ 重构包结构：更清晰的模块组织（本文档已对齐实际文件名）
-- 🎯 推荐使用方式：以 DataService 为统一入口
-- 📋 完整导出：`__all__` 列表包含主要组件与模型
 
 ---
 
-这个数据服务层为整个股票分析系统提供了坚实的数据基础，通过模块化设计和策略化选择数据源实现高灵活性。便捷API使使用更加简单直观，同时保持完整的功能和配置灵活性。
+这个数据服务层通过混合下载策略和智能决策机制，为股票分析系统提供了高效可靠的数据基础设施。模块化设计和配置化管理使得系统易于维护和扩展。
