@@ -6,7 +6,7 @@
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from .financial_models import FinancialData
 from .price_models import StockData
@@ -51,6 +51,101 @@ class DataQuality:
         """检查是否有严重问题"""
         critical_keywords = ['失败', '错误', '不可用', '无法获取']
         return any(keyword in issue for issue in self.issues for keyword in critical_keywords)
+
+    @staticmethod
+    def _get_quality_grade(score: float) -> str:
+        """根据评分获取质量等级"""
+        if score >= 0.9:
+            return 'A - 优秀'
+        elif score >= 0.7:
+            return 'B - 良好'
+        elif score >= 0.5:
+            return 'C - 一般'
+        elif score >= 0.3:
+            return 'D - 较差'
+        else:
+            return 'F - 很差'
+
+    @classmethod
+    def assess_data_quality(
+        cls,
+        stock_data: Union[StockData, Dict],
+        financial_data: Union[FinancialData, Dict],
+        start_date: str,
+    ) -> 'DataQuality':
+        """
+        评估数据质量（供 Service 与 Downloader 共享）
+        
+        Args:
+            stock_data: 股票数据或包含错误信息的字典
+            financial_data: 财务数据或包含错误信息的字典
+            start_date: 数据开始日期，用于计算完整性
+            
+        Returns:
+            DataQuality 对象，包含完整的质量评估信息
+        """
+        stock_available = False
+        financial_available = False
+        issues = []
+
+        # 检查股票数据可用性
+        if isinstance(stock_data, StockData):
+            stock_available = True
+        elif isinstance(stock_data, dict):
+            stock_available = 'error' not in stock_data
+
+        # 检查财务数据可用性
+        if isinstance(financial_data, FinancialData):
+            financial_available = True
+        elif isinstance(financial_data, dict):
+            financial_available = 'error' not in financial_data
+
+        # 计算股票数据完整性
+        stock_data_completeness = None
+        if stock_available:
+            if isinstance(stock_data, StockData):
+                data_points = stock_data.data_points
+            else:
+                data_points = stock_data.get('data_points', 0)
+            
+            # 估算预期数据点数（考虑周末和节假日，约70%的工作日）
+            expected_points = (datetime.now() - datetime.strptime(start_date, '%Y-%m-%d')).days
+            stock_data_completeness = min(1.0, data_points / (expected_points * 0.7))
+        else:
+            issues.append('股票价格数据不可用')
+
+        # 计算财务报表数量
+        financial_statements_count = 0
+        if financial_available:
+            if isinstance(financial_data, FinancialData):
+                statements = financial_data.financial_statements
+            else:
+                statements = financial_data.get('financial_statements', {})
+            financial_statements_count = len(statements)
+            if len(statements) < 3:
+                issues.append('财务报表数据不完整')
+        else:
+            issues.append('财务数据不可用')
+
+        # 计算总体完整性评分
+        completeness_score = 0.0
+        if stock_available:
+            completeness_score += 0.6  # 股票数据权重60%
+        if financial_available:
+            completeness_score += 0.4  # 财务数据权重40%
+
+        # 获取质量等级
+        quality_grade = cls._get_quality_grade(completeness_score)
+
+        return cls(
+            stock_data_available=stock_available,
+            financial_data_available=financial_available,
+            data_completeness=completeness_score,
+            quality_grade=quality_grade,
+            issues=issues,
+            stock_data_completeness=stock_data_completeness,
+            financial_statements_count=financial_statements_count,
+        )
 
 
 @dataclass
