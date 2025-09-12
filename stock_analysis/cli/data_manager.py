@@ -1,10 +1,55 @@
 #!/usr/bin/env python3
 """
-简化版数据管理工具
+股票数据管理工具 - Stock Data Management Tool
 
-功能:
-- download: 针对一个或多个股票下载数据并入库
-- query: 查询某一只股票的价格数据
+功能 Features:
+- 智能下载股票价格和财务数据到本地SQLite数据库
+- 支持混合下载策略：Stooq批量历史数据 + Finnhub增量更新
+- 查询和展示已存储的股票价格数据
+
+用法示例 Usage Examples:
+
+下载单只股票数据 Download Single Stock:
+  python stock_analysis/cli/data_manager.py download -s AAPL
+
+下载多只股票数据 Download Multiple Stocks:
+  python stock_analysis/cli/data_manager.py download -s AAPL MSFT GOOG
+
+下载包含财务数据 Download with Financial Data:
+  python stock_analysis/cli/data_manager.py download -s AAPL --comprehensive
+
+仅下载财务数据 Download Financial Data Only:
+  python stock_analysis/cli/data_manager.py download -s AAPL --financial-only
+
+从默认关注列表下载 Download from Watchlist:
+  python stock_analysis/cli/data_manager.py download --watchlist
+
+指定起始日期下载 Download from Specific Date:
+  python stock_analysis/cli/data_manager.py download -s AAPL --start-date 2020-01-01
+
+查询股票价格数据 Query Stock Price Data:
+  python stock_analysis/cli/data_manager.py query -s AAPL
+
+查询指定时间范围 Query Date Range:
+  python stock_analysis/cli/data_manager.py query -s AAPL --start-date 2024-01-01 --end-date 2024-12-31
+
+限制查询结果数量 Limit Query Results:
+  python stock_analysis/cli/data_manager.py query -s AAPL --limit 20
+
+详细日志输出 Verbose Logging:
+  python stock_analysis/cli/data_manager.py download -s AAPL -v
+
+下载策略说明 Download Strategy:
+- 首次下载: 使用 Stooq 获取完整历史数据
+- 增量更新: 数据在100天内使用 Finnhub，超过100天使用 Stooq 重新下载
+- 财务数据: 统一使用 Finnhub，带90天刷新阈值
+- 自动回退: Finnhub 失败时自动回退到 Stooq
+
+环境变量配置 Environment Variables:
+- FINNHUB_API_KEY: Finnhub API密钥（必需）
+- DATA_SERVICE_DB_PATH: 数据库路径
+- DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS: 增量更新阈值（默认100天）
+- WATCHLIST: 默认关注股票列表（逗号分隔）
 """
 
 import argparse

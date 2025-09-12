@@ -1,17 +1,46 @@
 #!/usr/bin/env python3
 """
-分析工具（基于 analysis_service）
+股票技术分析工具 - Stock Technical Analysis Tool
 
-功能:
-- 对指定股票运行可插拔 Operators 流水线分析
-- 结果以 JSON 写入本地文件
+功能 Features:
+- 对指定股票运行可插拔技术分析算子流水线
+- 支持移动平均线、RSI、财务比率、健康评分等多种指标
+- 分析结果以 JSON 格式保存到本地文件
 
-示例:
-  python tools/data_analyzer.py -s AAPL MSFT --period 6mo \
-      --operators ma,rsi,drop_alert,fin_ratios,fin_health
+用法示例 Usage Examples:
 
-  python tools/data_analyzer.py --symbols-file symbols.txt --start-date 2022-01-01 \
-      --db-path database/stock_data.db --output result/output.json
+基础分析 Basic Analysis:
+  python stock_analysis/cli/data_analyzer.py -s AAPL
+
+多股票分析 Multiple Stocks:
+  python stock_analysis/cli/data_analyzer.py -s AAPL MSFT GOOG --period 6mo
+
+自定义分析算子 Custom Operators:
+  python stock_analysis/cli/data_analyzer.py -s AAPL --operators ma,rsi,fin_ratios,fin_health
+
+指定时间范围 Date Range:
+  python stock_analysis/cli/data_analyzer.py -s AAPL --start-date 2023-01-01 --end-date 2024-01-01
+
+从文件读取股票列表 From File:
+  python stock_analysis/cli/data_analyzer.py --symbols-file my_stocks.txt --period 1y
+
+自定义输出文件 Custom Output:
+  python stock_analysis/cli/data_analyzer.py -s AAPL --output my_analysis.json
+
+详细日志模式 Verbose Mode:
+  python stock_analysis/cli/data_analyzer.py -s AAPL -v
+
+支持的分析算子 Supported Operators:
+- ma: 移动平均线 (5, 10, 20, 50日)
+- rsi: 相对强弱指数 (14日)
+- fin_ratios: 财务比率 (净利润率、ROE、负债率、PE)
+- fin_health: 财务健康评分 (A-F等级)
+- drop_alert: 跌幅警报 (1日)
+- drop_alert_7d: 7日跌幅警报
+
+支持的时间周期 Supported Periods:
+- 6mo, 1y, 2y, 5y, max
+- 或使用 --start-date 和 --end-date 指定具体日期
 """
 
 from __future__ import annotations

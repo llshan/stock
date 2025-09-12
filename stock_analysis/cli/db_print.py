@@ -1,19 +1,60 @@
 #!/usr/bin/env python3
 """
-简单的数据库查看工具（SQLite）
+SQLite数据库查看工具 - Database Inspection Tool
 
-功能：
-- 列出所有表：list
-- 查看表结构：schema -t <table>
-- 打印表数据：print -t <table> [--columns ...] [--where ...] [--order-by ...] [--limit N]
+功能 Features:
+- 列出数据库中的所有表和视图
+- 查看表结构和索引信息
+- 执行SQL查询并以表格形式显示数据
+- 支持条件过滤、排序、列选择等高级查询
 
-示例：
-- 列出表：
-  python tools/db_print.py list --db-path database/stock_data.db
-- 查看结构：
-  python tools/db_print.py schema -t stock_prices --db-path database/stock_data.db
-- 打印数据：
-  python tools/db_print.py print -t stock_prices --where "symbol='AAPL'" --order-by date DESC --limit 20
+用法示例 Usage Examples:
+
+列出所有表 List All Tables:
+  python stock_analysis/cli/db_print.py list
+
+查看表结构 View Table Schema:
+  python stock_analysis/cli/db_print.py schema -t stocks
+  python stock_analysis/cli/db_print.py schema -t stock_prices
+
+打印表数据 Print Table Data:
+  python stock_analysis/cli/db_print.py print -t stocks
+
+查看AAPL股票价格数据 View AAPL Price Data:
+  python stock_analysis/cli/db_print.py print -t stock_prices --where "symbol='AAPL'" --limit 10
+
+查看最近的股票数据 View Recent Stock Data:
+  python stock_analysis/cli/db_print.py print -t stock_prices --order-by "date DESC" --limit 20
+
+选择特定列 Select Specific Columns:
+  python stock_analysis/cli/db_print.py print -t stock_prices --columns symbol,date,close --limit 10
+
+查看财务数据 View Financial Data:
+  python stock_analysis/cli/db_print.py print -t income_statement --where "symbol='AAPL'"
+
+复杂查询 Complex Query:
+  python stock_analysis/cli/db_print.py print -t stock_prices \\
+    --where "symbol='AAPL' AND date >= '2024-01-01'" \\
+    --columns symbol,date,open,high,low,close,volume \\
+    --order-by "date DESC" \\
+    --limit 50
+
+自定义数据库路径 Custom Database Path:
+  python stock_analysis/cli/db_print.py list --db-path /path/to/your/database.db
+
+支持的表 Available Tables:
+- stocks: 股票基本信息
+- stock_prices: 股票价格数据  
+- income_statement: 损益表
+- balance_sheet: 资产负债表
+- cash_flow: 现金流量表
+- download_logs: 下载日志
+
+常用查询示例 Common Queries:
+- 查看所有股票列表: print -t stocks
+- 最新股价: print -t stock_prices --order-by "date DESC" --limit 20
+- 特定股票财务: print -t income_statement --where "symbol='AAPL'"
+- 下载历史: print -t download_logs --order-by "download_time DESC" --limit 10
 """
 
 import argparse

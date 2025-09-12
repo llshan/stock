@@ -1,22 +1,65 @@
 #!/usr/bin/env python3
 """
-财务指标查看工具
+财务指标分析工具 - Financial Metrics Analysis Tool
 
-功能：
-- 显示财务概览：summary <symbol>
-- 查看具体指标：metrics <symbol> [--type <statement_type>] [--period <period>]  
-- 比较多个股票：compare <symbol1> <symbol2> [...]
-- 趋势分析：trend <symbol> <metric_name>
+功能 Features:
+- 展示股票财务报表的关键指标和趋势
+- 支持损益表、资产负债表、现金流量表分析
+- 多股票财务对比和历史趋势分析
+- 格式化财务数据展示（支持B/M/K单位）
 
-示例：
-- 显示AAPL财务概览：
-  financial-metrics summary AAPL
-- 查看AAPL损益表指标：
-  financial-metrics metrics AAPL --type income_statement
-- 比较AAPL和MSFT：
-  financial-metrics compare AAPL MSFT
-- 查看净利润趋势：
-  financial-metrics trend AAPL net_income
+用法示例 Usage Examples:
+
+显示财务概览 Financial Summary:
+  python stock_analysis/cli/financial_metrics.py summary AAPL
+  python stock_analysis/cli/financial_metrics.py summary MRK
+
+查看损益表指标 Income Statement Metrics:
+  python stock_analysis/cli/financial_metrics.py metrics AAPL --type income_statement
+
+查看资产负债表 Balance Sheet Metrics:
+  python stock_analysis/cli/financial_metrics.py metrics AAPL --type balance_sheet
+
+查看现金流量表 Cash Flow Metrics:
+  python stock_analysis/cli/financial_metrics.py metrics AAPL --type cash_flow
+
+指定时间期间 Specific Period:
+  python stock_analysis/cli/financial_metrics.py metrics AAPL --period 2024-12-31
+
+多股票对比 Compare Multiple Stocks:
+  python stock_analysis/cli/financial_metrics.py compare AAPL MSFT GOOG
+  python stock_analysis/cli/financial_metrics.py compare AAPL MSFT --type income_statement
+
+趋势分析 Trend Analysis:
+  python stock_analysis/cli/financial_metrics.py trend AAPL "Net income"
+  python stock_analysis/cli/financial_metrics.py trend AAPL "Total assets"
+
+查看所有可用指标 List Available Metrics:
+  python stock_analysis/cli/financial_metrics.py list-metrics AAPL
+
+自定义数据库路径 Custom Database Path:
+  python stock_analysis/cli/financial_metrics.py summary AAPL --db-path /path/to/database.db
+
+详细输出模式 Verbose Mode:
+  python stock_analysis/cli/financial_metrics.py summary AAPL -v
+
+支持的报表类型 Supported Statement Types:
+- income_statement: 损益表 (收入、成本、利润等)
+- balance_sheet: 资产负债表 (资产、负债、股东权益)  
+- cash_flow: 现金流量表 (经营、投资、筹资现金流)
+
+常用财务指标 Common Financial Metrics:
+- 净销售额 (Net sales)
+- 净利润 (Net income)  
+- 总资产 (Total assets)
+- 现金及等价物 (Cash and cash equivalents)
+- 股东权益 (Shareholders' equity)
+- 经营现金流 (Operating cash flow)
+
+数据格式 Data Format:
+- 金额自动格式化为 B(十亿)、M(百万)、K(千) 单位
+- 日期按照 YYYY-MM-DD 格式显示
+- 支持多年度数据对比和趋势分析
 """
 
 import argparse
