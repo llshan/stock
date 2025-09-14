@@ -15,8 +15,8 @@ service = DataService(config=config)
 
 # 智能下载并入库（自动选择最佳策略）
 result = service.download_and_store_stock_data("AAPL")
-print(f"使用策略: {result.get('used_strategy')}")
-print(f"数据点数: {result.get('data_points')}")
+print(f"使用策略: {result.used_strategy}")
+print(f"数据点数: {result.data_points}")
 
 # 下载财务数据
 financial_result = service.download_and_store_financial_data("AAPL")
@@ -48,8 +48,7 @@ stock_analysis/data/
 │   ├── __init__.py
 │   ├── base.py                      # 存储抽象基类
 │   └── sqlite_storage.py            # SQLite存储实现
-├── quality.py                       # 📏 数据质量评估
-└── exceptions.py                    # ❌ 异常定义
+```
 ```
 
 ## 🧩 核心组件功能
@@ -57,7 +56,6 @@ stock_analysis/data/
 ### 🏢 `data_service.py` - 核心数据服务
 **混合下载策略的中央协调服务**
 - 智能选择数据源：100天阈值判断增量 vs 批量
-- 自动回退机制：Finnhub失败时回退到Stooq
 - 统一的错误处理和日志记录
 
 **混合下载策略:**
@@ -110,9 +108,6 @@ stock_prices (symbol, date, open, high, low, close, volume, ...)
 income_statement (symbol, period, revenue, net_income, ...)
 balance_sheet (symbol, period, total_assets, equity, ...)  
 cash_flow (symbol, period, operating_cf, free_cf, ...)
-
--- 规范化指标表 (用于分析)
-income_statement_metrics, balance_sheet_metrics, cash_flow_metrics
 ```
 
 ### ⚙️ `config.py` - 配置管理
@@ -125,8 +120,7 @@ income_statement_metrics, balance_sheet_metrics, cash_flow_metrics
 ```python
 # 关键配置参数
 stock_incremental_threshold_days: int = 100  # 增量更新阈值
-financial_refresh_days: int = 90             # 财务数据刷新阈值  
-financial_downloader: str = 'finnhub'       # 财务数据下载器
+financial_refresh_days: int = 90             # 财务数据刷新阈值
 max_retries: int = 3                         # 最大重试次数
 base_delay: int = 30                         # 基础延迟时间
 ```
@@ -140,7 +134,6 @@ export FINNHUB_API_KEY="your_finnhub_api_key"
 # 可选配置
 export DATA_SERVICE_DB_PATH="database/stock_data.db"
 export DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS="100"
-export DATA_SERVICE_FINANCIAL_DOWNLOADER="finnhub"
 export DATA_SERVICE_FINANCIAL_REFRESH_DAYS="90"
 export DATA_SERVICE_MAX_RETRIES="3"
 export DATA_SERVICE_LOG_LEVEL="INFO"
@@ -174,27 +167,27 @@ service = DataService(config=config)
 ```python
 # 下载股票价格数据
 result = service.download_and_store_stock_data('AAPL')
-print(f"策略: {result['used_strategy']}")
-print(f"数据点: {result['data_points']}")
+print(f"策略: {result.used_strategy}")
+print(f"数据点: {result.data_points}")
 
 # 下载财务数据  
 financial_result = service.download_and_store_financial_data('AAPL')
 
 # 批量下载 (推荐)
 symbols = ['AAPL', 'GOOG', 'MSFT']
-results = service.batch_download_and_store(
+batch = service.batch_download_and_store(
     symbols, 
     include_financial=True,
     start_date='2020-01-01'
 )
 
 # 检查批量结果
-print(f"成功: {results['successful']}/{results['total']}")
-for symbol, result in results['results'].items():
-    if result['success']:
-        print(f"✅ {symbol}: {result.get('used_strategy', 'N/A')}")
+print(f"成功: {batch.successful}/{batch.total}")
+for symbol, res in batch.results.items():
+    if res.success:
+        print(f"✅ {symbol}: {res.used_strategy or 'N/A'}")
     else:
-        print(f"❌ {symbol}: {result.get('error', 'Unknown error')}")
+        print(f"❌ {symbol}: {res.error_message or 'Unknown error'}")
 ```
 
 ### 数据查询
@@ -205,8 +198,7 @@ symbols = service.get_existing_symbols()
 # 获取最后更新日期  
 last_date = service.get_last_update_date('AAPL')
 
-# 数据库统计 (通过storage)
-stats = service.storage.get_database_stats()
+ # 其他查询参见 storage 接口
 ```
 
 ## 🎯 混合下载策略详解
@@ -226,16 +218,7 @@ def determine_download_strategy(symbol, last_update_date):
         return "Stooq批量重新下载"   # 数据过旧，批量更新
 ```
 
-### 自动回退机制
-```python
-# Finnhub增量更新失败时自动回退
-try:
-    data = finnhub_downloader.download_stock_data(symbol, start_date)
-    strategy = "Finnhub增量更新"
-except FinnhubAPIError:
-    data = stooq_downloader.download_stock_data(symbol, start_date)  
-    strategy = "Stooq增量更新(Finnhub失败回退)"
-```
+
 
 ## 🏗️ 扩展开发
 
@@ -273,15 +256,15 @@ class CustomStorage(BaseStorage):
 ```python
 # 总是检查返回结果
 result = service.download_and_store_stock_data("INVALID_SYMBOL")
-if not result.get('success'):
-    print(f"下载失败: {result.get('error')}")
+if not result.success:
+    print(f"下载失败: {result.error_message}")
     # 处理错误...
 ```
 
 ### 批量操作最佳实践
 ```python
 # ✅ 推荐：批量操作
-results = service.batch_download_and_store(symbols, include_financial=True)
+batch = service.batch_download_and_store(symbols, include_financial=True)
 
 # ❌ 避免：循环单个操作
 for symbol in symbols:
@@ -318,7 +301,6 @@ result = service.download_and_store_stock_data("AAPL")
 # 查看当前配置
 config = DataServiceConfig.from_env()
 print(f"增量阈值: {config.downloader.stock_incremental_threshold_days}天")
-print(f"财务下载器: {config.downloader.financial_downloader}")
 print(f"数据库路径: {config.database.db_path}")
 ```
 

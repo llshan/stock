@@ -21,10 +21,12 @@ from typing import Any, Dict, List, Optional, Union
 from .config import DataServiceConfig
 from .downloaders.stooq import StooqDataDownloader
 from .downloaders.finnhub import FinnhubDownloader
+from .downloaders.base import DownloaderError
 from .models import (
     FinancialData,
     StockData,
 )
+from .models.quality_models import DownloadResult, BatchDownloadResult
 from .storage import create_storage
 from .storage.base import BaseStorage
 
@@ -53,15 +55,6 @@ class DataService:
 
         self.logger = logging.getLogger(__name__)
 
-    def _get_financial_downloader(self):
-        """根据配置获取财务数据下载器"""
-        downloader_type = self.config.downloader.financial_downloader.lower()
-        if downloader_type == 'finnhub':
-            return self.finnhub_downloader
-        else:
-            self.logger.warning(f"未知的财务下载器类型: {downloader_type}, 使用默认的 Finnhub")
-            return self.finnhub_downloader
-
     def get_last_update_date(self, symbol: str) -> Optional[str]:
         """
         获取股票的最后更新日期
@@ -85,7 +78,7 @@ class DataService:
 
     def download_and_store_stock_data(
         self, symbol: str, start_date: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> DownloadResult:
         """
         下载并存储股票数据（批量用Stooq，增量用Finnhub）
 
@@ -98,94 +91,76 @@ class DataService:
         """
         try:
             self.logger.info(f"📈 开始下载并存储 {symbol} 股票数据")
-            # 统一自动策略，并入库
             self._ensure_stock_record(symbol)
-            # 增量起点
-            raw_last = None
+
+            # 获取已有最新日期
             try:
                 raw_last = self.storage.get_last_update_date(symbol)
             except Exception:
                 raw_last = None
-            
-            # 检查数据是否已经是最新的
+
+            # 已最新则跳过
             if raw_last:
                 today = datetime.now().strftime('%Y-%m-%d')
                 if raw_last >= today:
-                    return {
-                        'success': True,
-                        'symbol': symbol,
-                        'no_new_data': True,
-                        'used_strategy': 'skip_already_current',
-                        'data_points': 0,
-                    }
-            
+                    return DownloadResult(
+                        success=True,
+                        symbol=symbol,
+                        data_type='stock',
+                        data_points=0,
+                        used_strategy='skip_already_current',
+                        metadata={'no_new_data': True},
+                    )
+
             actual_start = (
                 (datetime.strptime(raw_last, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
                 if raw_last
                 else (start_date or '2000-01-01')
             )
 
-            # 混合策略：根据最新数据时间决定批量还是增量
+            # 策略选择
             if raw_last is None:
-                # 首次下载，使用Stooq批量下载历史数据
                 used = 'Stooq批量历史数据'
-                data = self.stooq_downloader.download_stock_data(symbol, actual_start)
+                stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
             else:
-                # 计算距今天数，决定是否使用增量更新
                 days_since_last = (datetime.now() - datetime.strptime(raw_last, '%Y-%m-%d')).days
                 threshold_days = getattr(self.config.downloader, 'stock_incremental_threshold_days', 100)
-                
                 if days_since_last <= threshold_days:
-                    # 在阈值内，使用增量更新（优先Finnhub）
                     used = 'Finnhub增量更新'
-                    data = self.finnhub_downloader.download_stock_data(symbol, actual_start)
-                    
-                    # 如果Finnhub失败，回退到Stooq
-                    if isinstance(data, dict) and 'error' in data:
-                        self.logger.warning(f"Finnhub增量更新失败，回退到Stooq: {data['error']}")
-                        used = 'Stooq增量更新(Finnhub失败回退)'
-                        data = self.stooq_downloader.download_stock_data(symbol, actual_start)
+                    stock = self.finnhub_downloader.download_stock_data(symbol, actual_start)
                 else:
-                    # 超过阈值，使用Stooq批量重新下载
                     used = f'Stooq批量重下载(超过{threshold_days}天阈值)'
-                    self.logger.info(f"{symbol} 最后更新距今 {days_since_last} 天，超过 {threshold_days} 天阈值，使用批量下载")
-                    data = self.stooq_downloader.download_stock_data(symbol, actual_start)
+                    self.logger.info(
+                        f"{symbol} 最后更新距今 {days_since_last} 天，超过 {threshold_days} 天阈值，使用批量下载"
+                    )
+                    stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
 
-            if isinstance(data, dict) and 'error' in data:
-                return {
-                    'success': False,
-                    'error': data['error'],
-                    'symbol': symbol,
-                    'used_strategy': used,
-                }
-            if isinstance(data, StockData):
-                if data.data_points > 0:
-                    self.storage.store_stock_data(symbol, data)
-                    return {
-                        'success': True,
-                        'symbol': symbol,
-                        'data_points': data.data_points,
-                        'used_strategy': used,
-                        'incremental': True,
-                    }
-                return {
-                    'success': True,
-                    'symbol': symbol,
-                    'data_points': 0,
-                    'no_new_data': True,
-                    'used_strategy': used,
-                }
-            return {
-                'success': False,
-                'error': f'未知数据格式: {type(data)}',
-                'symbol': symbol,
-            }
+            # 入库
+            self.storage.store_stock_data(symbol, stock)
+            return DownloadResult(
+                success=True,
+                symbol=symbol,
+                data_type='stock',
+                data_points=stock.data_points,
+                used_strategy=used,
+                data_source=stock.data_source,
+                metadata={'incremental': stock.incremental_update, 'no_new_data': stock.no_new_data},
+            )
+        except DownloaderError as e:
+            return DownloadResult(
+                success=False,
+                symbol=symbol,
+                data_type='stock',
+                data_points=0,
+                error_message=str(e),
+                used_strategy=locals().get('used'),
+            )
         except Exception as e:
             error_msg = f"下载并存储 {symbol} 数据失败: {str(e)}"
             self.logger.error(error_msg)
-            return {'success': False, 'error': error_msg, 'symbol': symbol}
+            return DownloadResult(success=False, symbol=symbol, data_type='stock', error_message=error_msg)
 
-    def download_and_store_financial_data(self, symbol: str) -> Dict[str, Any]:
+    def download_and_store_financial_data(self, symbol: str) -> DownloadResult:
         """
         下载并存储财务数据（带刷新阈值）。
 
@@ -209,60 +184,58 @@ class DataService:
                     need_refresh = True
 
             if not need_refresh:
-                return {
-                    'success': True,
-                    'symbol': symbol,
-                    'no_new_data': True,
-                    'used_strategy': 'skip_recent_financial',
-                }
+                return DownloadResult(
+                    success=True,
+                    symbol=symbol,
+                    data_type='financial',
+                    data_points=0,
+                    used_strategy='skip_recent_financial',
+                    metadata={'no_new_data': True},
+                )
 
-            downloader = self._get_financial_downloader()
-            downloader_name = self.config.downloader.financial_downloader.lower()
+            downloader = self.finnhub_downloader
+            downloader_name = 'finnhub'
             
             fin = downloader.download_financial_data(symbol, use_retry=True)
-            if isinstance(fin, dict) and 'error' in fin:
-                return {
-                    'success': False,
-                    'symbol': symbol,
-                    'error': fin['error'],
-                    'used_strategy': f'{downloader_name}_financial_error',
-                }
+            stmt_count = len(fin.financial_statements)
+            if stmt_count == 0:
+                return DownloadResult(
+                    success=False,
+                    symbol=symbol,
+                    data_type='financial',
+                    data_points=0,
+                    error_message='未获取到财务报表（返回为空）',
+                    used_strategy=f'{downloader_name}_financial_empty',
+                )
+            self.storage.store_financial_data(symbol, fin)
+            return DownloadResult(
+                success=True,
+                symbol=symbol,
+                data_type='financial',
+                data_points=stmt_count,
+                used_strategy=f'{downloader_name}_financial',
+            )
 
-            if isinstance(fin, FinancialData):
-                stmt_count = len(fin.financial_statements)
-                if stmt_count == 0:
-                    # 不写入空财务数据，视为无有效数据
-                    return {
-                        'success': False,
-                        'symbol': symbol,
-                        'error': '未获取到财务报表（返回为空）',
-                        'used_strategy': f'{downloader_name}_financial_empty',
-                    }
-                self.storage.store_financial_data(symbol, fin)
-                return {
-                    'success': True,
-                    'symbol': symbol,
-                    'statements': stmt_count,
-                    'used_strategy': f'{downloader_name}_financial',
-                }
-
-            return {
-                'success': False,
-                'symbol': symbol,
-                'error': f'未知数据格式: {type(fin)}',
-            }
-
+        except DownloaderError as e:
+            return DownloadResult(
+                success=False,
+                symbol=symbol,
+                data_type='financial',
+                data_points=0,
+                error_message=str(e),
+                used_strategy=f'{downloader_name}_financial_error',
+            )
         except Exception as e:
             error_msg = f"下载并存储 {symbol} 财务数据失败: {str(e)}"
             self.logger.error(error_msg)
-            return {'success': False, 'error': error_msg, 'symbol': symbol}
+            return DownloadResult(success=False, symbol=symbol, data_type='financial', error_message=error_msg)
 
     def batch_download_and_store(
         self,
         symbols: List[str],
         start_date: Optional[str] = None,
         include_financial: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> BatchDownloadResult:
         """
         批量下载并存储数据
 
@@ -274,8 +247,11 @@ class DataService:
         Returns:
             批量操作结果
         """
-        results = {}
+        results: Dict[str, DownloadResult] = {}
         total = len(symbols)
+        import time as _time
+        start_ts = _time.time()
+        start_time = datetime.now().isoformat()
 
         data_type = "股票+财务数据" if include_financial else "股票数据"
         self.logger.info(f"🎯 开始批量处理 {total} 个股票的{data_type}")
@@ -291,14 +267,21 @@ class DataService:
 
                 if include_financial:
                     financial_result = self.download_and_store_financial_data(symbol)
-                    combined = {
-                        'success': stock_result.get('success', False)
-                        and financial_result.get('success', False),
-                        'symbol': symbol,
-                        'stock': stock_result,
-                        'financial': financial_result,
-                    }
-                    results[symbol] = combined
+                    # 聚合：以两者成功为总成功
+                    success = stock_result.success and financial_result.success
+                    # 记录主要策略
+                    used_strategy = stock_result.used_strategy or financial_result.used_strategy
+                    results[symbol] = DownloadResult(
+                        success=success,
+                        symbol=symbol,
+                        data_type='comprehensive',
+                        data_points=stock_result.data_points + financial_result.data_points,
+                        used_strategy=used_strategy,
+                        metadata={
+                            'stock': stock_result.to_dict(),
+                            'financial': financial_result.to_dict(),
+                        },
+                    )
                 else:
                     results[symbol] = stock_result
 
@@ -310,24 +293,34 @@ class DataService:
 
             except Exception as e:
                 self.logger.error(f"处理 {symbol} 时出错: {str(e)}")
-                results[symbol] = {
-                    'success': False,
-                    'error': str(e),
-                    'symbol': symbol,
-                }
+                results[symbol] = DownloadResult(
+                    success=False, symbol=symbol, data_type='comprehensive', error_message=str(e)
+                )
 
         # 统计结果
-        successful = len([r for r in results.values() if r.get('success', False)])
+        successful = len([r for r in results.values() if r.success])
         failed = total - successful
 
         self.logger.info(f"✅ 批量处理完成，成功: {successful}/{total}")
+        end_time = datetime.now().isoformat()
+        total_duration = _time.time() - start_ts
 
-        return {
-            'total': total,
-            'successful': successful,
-            'failed': failed,
-            'results': results,
-        }
+        # 统计策略使用
+        strategy_usage: Dict[str, int] = {}
+        for r in results.values():
+            if r.used_strategy:
+                strategy_usage[r.used_strategy] = strategy_usage.get(r.used_strategy, 0) + 1
+
+        return BatchDownloadResult(
+            total=total,
+            successful=successful,
+            failed=failed,
+            results=results,
+            start_time=start_time,
+            end_time=end_time,
+            total_duration=total_duration,
+            strategy_usage=strategy_usage,
+        )
 
     # 质量评估逻辑已集中到 quality.assess_data_quality，无需本地额外包装
 

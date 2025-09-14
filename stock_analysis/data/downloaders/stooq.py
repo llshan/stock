@@ -12,7 +12,7 @@ from typing import Dict, Optional, Union
 import pandas_datareader as pdr
 
 from ..models import PriceData, StockData, SummaryStats
-from .base import BaseDownloader
+from .base import BaseDownloader, DownloaderError
 
 
 class StooqDataDownloader(BaseDownloader):
@@ -68,7 +68,7 @@ class StooqDataDownloader(BaseDownloader):
             data = pdr.DataReader(stooq_symbol, self.data_source, start_date, end_date)
 
             if data.empty:
-                return {'error': f'从Stooq无法获取 {symbol} 的历史数据'}
+                raise DownloaderError(f'从Stooq无法获取 {symbol} 的历史数据')
 
             # 转换为dataclass格式
             price_data = PriceData(
@@ -81,6 +81,7 @@ class StooqDataDownloader(BaseDownloader):
                 adj_close=data['Close'].tolist(),  # Stooq数据通常已调整
             )
 
+            # Note(jlshan): need to check the logic. Is it calculation the summary for the whole period?
             summary_stats = SummaryStats(
                 min_price=float(data['Close'].min()),
                 max_price=float(data['Close'].max()),
@@ -107,59 +108,6 @@ class StooqDataDownloader(BaseDownloader):
         except Exception as e:
             error_msg = f"从Stooq下载 {symbol} 数据失败: {str(e)}"
             self.logger.error(error_msg)
-            return {'error': error_msg}
-
-    def test_connection(self) -> bool:
-        """测试Stooq连接"""
-        try:
-            self.logger.info("🔍 测试Stooq连接...")
-
-            # 尝试获取AAPL的最近一天数据
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=5)  # 多取几天确保有数据
-
-            data = pdr.DataReader('AAPL.US', 'stooq', start_date, end_date)
-
-            if not data.empty:
-                self.logger.info(f"✅ Stooq连接正常，获取到 {len(data)} 条AAPL数据")
-                return True
-            else:
-                self.logger.warning("⚠️ Stooq连接正常但无数据")
-                return False
-
-        except Exception as e:
-            self.logger.error(f"❌ Stooq连接失败: {str(e)}")
-            return False
-
-
-if __name__ == "__main__":
-    # 测试Stooq下载器
-    from utils.logging_utils import setup_logging
-
-    from ..config import get_default_watchlist
-
-    setup_logging()
-    logging.getLogger(__name__).info("🌐 Stooq股票数据下载器测试")
-    logging.getLogger(__name__).info("=" * 50)
-
-    downloader = StooqDataDownloader()
-
-    # 测试连接
-    if downloader.test_connection():
-        logging.getLogger(__name__).info("✅ Stooq连接测试成功")
-
-        # 示例：逐只下载一个简短的关注列表
-        symbols = get_default_watchlist()
-        for i, sym in enumerate(symbols, 1):
-            logging.getLogger(__name__).info(f"📈 [{i}/{len(symbols)}] 测试下载 {sym} 数据…")
-            result = downloader.download_stock_data(sym, start_date='2000-01-01')
-            if isinstance(result, dict) and 'error' in result:
-                logging.getLogger(__name__).error(f"❌ {sym} 数据下载失败: {result['error']}")
-            elif isinstance(result, StockData):
-                logging.getLogger(__name__).info(
-                    f"✅ {sym}: {result.data_points} 个数据点，范围 {result.start_date} ~ {result.end_date}"
-                )
-            time.sleep(1)
-
-    else:
-        logging.getLogger(__name__).error("❌ Stooq连接测试失败，请检查网络连接")
+            if isinstance(e, DownloaderError):
+                raise
+            raise DownloaderError(error_msg)

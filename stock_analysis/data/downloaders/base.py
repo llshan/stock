@@ -8,6 +8,10 @@ import logging
 import time
 from abc import ABC
 from typing import Any, Callable
+from typing import Optional
+
+import requests
+from requests import exceptions as req_exc
 
 
 class BaseDownloader(ABC):
@@ -49,34 +53,42 @@ class BaseDownloader(ABC):
                     continue
                 else:
                     # 非可重试错误或已达最大重试次数
-                    raise e
+                    if isinstance(e, DownloaderError):
+                        raise
+                    raise DownloaderError(str(e))
 
-        raise Exception(f"{symbol} 重试 {self.max_retries} 次后仍然失败")
+        raise DownloaderError(f"{symbol} 重试 {self.max_retries} 次后仍然失败")
 
     def _is_api_error_retryable(self, error: Exception) -> bool:
-        """
-        判断API错误是否可重试
+        """判断是否属于“必要的可重试”错误。
 
-        Args:
-            error: 异常对象
-
-        Returns:
-            是否可重试
+        仅保留最必要的几类：
+        - HTTP 429（限流）
+        - HTTP 5xx 常见临时错误：502/503/504
+        - 超时与连接错误（requests Timeout/ConnectionError）
         """
-        error_msg = str(error).lower()
-        retryable_patterns = [
-            "429",
-            "too many requests",
-            "rate limit",
-            "timeout",
-            "timed out",
-            "connection",
-            "network",
-            "temporary",
-            "unavailable",
-            "internal server error",
-            "bad gateway",
-            "service unavailable",
-            "gateway timeout",
-        ]
-        return any(pattern in error_msg for pattern in retryable_patterns)
+        # requests 超时/连接错误
+        if isinstance(error, (req_exc.Timeout, req_exc.ConnectionError)):
+            return True
+
+        # 带有 HTTP 响应码的错误（如 requests.HTTPError）
+        resp = getattr(error, "response", None)
+        try:
+            status = int(getattr(resp, "status_code", 0)) if resp is not None else 0
+        except Exception:
+            status = 0
+        if status in (429, 502, 503, 504):
+            return True
+
+        # 字符串兜底（仅必要的几项，避免过度匹配）
+        msg = str(error).lower()
+        substrings = ("429", "too many requests", "rate limit", "timeout", "timed out")
+        if any(s in msg for s in substrings):
+            return True
+
+        return False
+
+
+class DownloaderError(Exception):
+    """下载器错误，统一由下载器抛出，服务层捕获并包装为 DownloadResult"""
+    pass

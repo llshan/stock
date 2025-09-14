@@ -41,6 +41,12 @@ Thumbs.db
 # Generated analytics files (excluded from repository)
 analytics/
 
+# Result files
+result/
+
+# Database files
+database/
+
 # Temporary files
 *.tmp
 *.log

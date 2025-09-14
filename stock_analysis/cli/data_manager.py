@@ -10,40 +10,39 @@
 用法示例 Usage Examples:
 
 下载单只股票数据 Download Single Stock:
-  python stock_analysis/cli/data_manager.py download -s AAPL
+  stock-data download -s AAPL
 
 下载多只股票数据 Download Multiple Stocks:
-  python stock_analysis/cli/data_manager.py download -s AAPL MSFT GOOG
+  stock-data download -s AAPL MSFT GOOG
 
 下载包含财务数据 Download with Financial Data:
-  python stock_analysis/cli/data_manager.py download -s AAPL --comprehensive
+  stock-data download -s AAPL --comprehensive
 
 仅下载财务数据 Download Financial Data Only:
-  python stock_analysis/cli/data_manager.py download -s AAPL --financial-only
+  stock-data download -s AAPL --financial-only
 
 从默认关注列表下载 Download from Watchlist:
-  python stock_analysis/cli/data_manager.py download --watchlist
+  stock-data download --use-default-watchlist
 
 指定起始日期下载 Download from Specific Date:
-  python stock_analysis/cli/data_manager.py download -s AAPL --start-date 2020-01-01
+  stock-data download -s AAPL --start-date 2020-01-01
 
 查询股票价格数据 Query Stock Price Data:
-  python stock_analysis/cli/data_manager.py query -s AAPL
+  stock-data query -s AAPL
 
 查询指定时间范围 Query Date Range:
-  python stock_analysis/cli/data_manager.py query -s AAPL --start-date 2024-01-01 --end-date 2024-12-31
+  stock-data query -s AAPL --start-date 2024-01-01 --end-date 2024-12-31
 
 限制查询结果数量 Limit Query Results:
-  python stock_analysis/cli/data_manager.py query -s AAPL --limit 20
+  stock-data query -s AAPL --limit 20
 
 详细日志输出 Verbose Logging:
-  python stock_analysis/cli/data_manager.py download -s AAPL -v
+  stock-data download -s AAPL -v
 
 下载策略说明 Download Strategy:
 - 首次下载: 使用 Stooq 获取完整历史数据
 - 增量更新: 数据在100天内使用 Finnhub，超过100天使用 Stooq 重新下载
 - 财务数据: 统一使用 Finnhub，带90天刷新阈值
-- 自动回退: Finnhub 失败时自动回退到 Stooq
 
 环境变量配置 Environment Variables:
 - FINNHUB_API_KEY: Finnhub API密钥（必需）
@@ -104,91 +103,63 @@ def cmd_download(args: argparse.Namespace) -> int:
             f"开始下载价格数据 {len(symbols)} 个，起始: {args.start_date or '自动增量'}（使用Stooq下载器）"
         )
 
-    # 逐只下载并入库（DataService 内部自动选择来源）
-    results = {}
-    strategy_usage: dict[str, int] = {}
-    ok = 0
-    for i, sym in enumerate(symbols):
-        try:
-            if mode == 'comprehensive':
-                stock_r = service.download_and_store_stock_data(
-                    sym, start_date=args.start_date or "2000-01-01"
-                )
-                fin_r = service.download_and_store_financial_data(sym)
-                r = {
-                    'success': stock_r.get('success', False) and fin_r.get('success', False),
-                    'stock': stock_r,
-                    'financial': fin_r,
-                }
-                results[sym] = r
-                if r.get('success'):
-                    ok += 1
-            elif mode == 'financial':
-                r = service.download_and_store_financial_data(sym)
-                results[sym] = r
-                if r.get('success'):
-                    ok += 1
-            else:
-                r = service.download_and_store_stock_data(
-                    sym, start_date=args.start_date or "2000-01-01"
-                )
-                results[sym] = r
-                used = r.get('used_strategy', 'Unknown') if isinstance(r, dict) else 'Unknown'
-                strategy_usage[used] = strategy_usage.get(used, 0) + 1
-                if r.get('success'):
-                    ok += 1
-        except Exception as e:
-            results[sym] = {'success': False, 'error': str(e)}
-        if i < len(symbols) - 1:
-            import time
+    # 下载并入库（DataService 内部自动选择来源）
+    if mode in ( 'stock', 'comprehensive'):
+        batch = service.batch_download_and_store(
+            symbols,
+            start_date=args.start_date or "2000-01-01",
+            include_financial=(mode == 'comprehensive'),
+        )
+        ok = batch.successful
+        fail = batch.failed
+        logger.info(f"完成：成功{ok}，失败{fail}")
+        if batch.strategy_usage:
+            logger.info("策略使用统计：" + ", ".join(f"{k}={v}" for k, v in batch.strategy_usage.items()))
 
-            time.sleep(2)
-
-    fail = len(symbols) - ok
-    logger.info(f"完成：成功{ok}，失败{fail}")
-    if strategy_usage:
-        logger.info("策略使用统计：" + ", ".join(f"{k}={v}" for k, v in strategy_usage.items()))
-
-    # 逐个结果
-    for sym, r in results.items():
-        if r.get('success'):
-            if mode == 'comprehensive':
-                stock_r = r.get('stock', {})
-                fin_r = r.get('financial', {})
-                stock_msg = (
-                    (
-                        "已最新"
-                        if stock_r.get('no_new_data')
-                        else f"入库{stock_r.get('data_points', 0)}条"
+        for sym, res in batch.results.items():
+            if res.success:
+                if mode == 'comprehensive':
+                    stock = res.metadata.get('stock') if res.metadata else None
+                    financial = res.metadata.get('financial') if res.metadata else None
+                    stock_msg = (
+                        "已最新" if (stock and stock.get('metadata', {}).get('no_new_data')) else f"入库{(stock or {}).get('data_points', 0)}条"
                     )
-                    if isinstance(stock_r, dict)
-                    else "完成"
-                )
-                if fin_r.get('no_new_data'):
-                    fin_msg = "已最新（跳过）"
-                else:
                     fin_msg = (
-                        f"写入{fin_r.get('statements', '?')}份报表"
-                        if 'statements' in fin_r
-                        else "完成"
+                        "已最新（跳过）" if (financial and financial.get('metadata', {}).get('no_new_data')) else f"写入{(financial or {}).get('data_points', 0)}份报表"
                     )
-                logger.info(f"{sym}: 价格={stock_msg}，财务={fin_msg}")
-            elif mode == 'financial':
-                if r.get('no_new_data'):
-                    logger.info(f"{sym}: 财务已最新（跳过刷新）")
+                    logger.info(f"{sym}: 价格={stock_msg}，财务={fin_msg}")
                 else:
-                    stmts = r.get('statements')
-                    logger.info(f"{sym}: 写入财务报表 {stmts} 份")
+                    used = res.used_strategy
+                    if res.metadata.get('no_new_data') if res.metadata else False:
+                        logger.info(f"{sym}: 已最新，无需更新{f'（策略：{used}）' if used else ''}")
+                    else:
+                        logger.info(f"{sym}: 入库 {res.data_points} 条{f'（策略：{used}）' if used else ''}")
             else:
-                used = r.get('used_strategy')
-                if r.get('no_new_data'):
-                    logger.info(f"{sym}: 已最新，无需更新{f'（策略：{used}）' if used else ''}")
+                logger.warning(f"{sym}: 失败 - {res.error_message or '未知错误'}")
+    else:
+        # financial-only
+        ok = 0
+        fail = 0
+        for i, sym in enumerate(symbols):
+            try:
+                r = service.download_and_store_financial_data(sym)
+                if r.success:
+                    if r.metadata.get('no_new_data') if r.metadata else False:
+                        logger.info(f"{sym}: 财务已最新（跳过刷新）")
+                    else:
+                        logger.info(f"{sym}: 写入财务报表 {r.data_points} 份")
+                    ok += 1
                 else:
-                    logger.info(
-                        f"{sym}: 入库 {r.get('data_points', 0)} 条{f'（策略：{used}）' if used else ''}"
-                    )
-        else:
-            logger.warning(f"{sym}: 失败 - {r.get('error','未知错误')}")
+                    logger.warning(f"{sym}: 失败 - {r.error_message or '未知错误'}")
+                    fail += 1
+            except Exception as e:
+                logger.warning(f"{sym}: 失败 - {e}")
+                fail += 1
+            if i < len(symbols) - 1:
+                import time
+                time.sleep(2)
+
+        logger.info(f"完成：成功{ok}，失败{fail}")
 
     service.close()
     return 0

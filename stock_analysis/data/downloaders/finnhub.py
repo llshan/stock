@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import requests
 
-from .base import BaseDownloader
+from .base import BaseDownloader, DownloaderError
 from ..models import (
     PriceData,
     StockData,
@@ -72,11 +72,9 @@ class FinnhubDownloader(BaseDownloader):
         self, symbol: str, start_date: Optional[str], end_date: Optional[str]
     ) -> Union[StockData, Dict[str, str]]:
         if not self.api_key:
-            return {
-                "error": (
-                    "缺少 Finnhub API Key（请设置 FINNHUB_API_KEY / FINNHUB_TOKEN，或通过构造参数 api_key 传入）"
-                )
-            }
+            raise DownloaderError(
+                "缺少 Finnhub API Key（请设置 FINNHUB_API_KEY / FINNHUB_TOKEN，或通过构造参数 api_key 传入）"
+            )
         try:
             # 时间范围
             start_str = start_date or "2000-01-01"
@@ -98,7 +96,7 @@ class FinnhubDownloader(BaseDownloader):
 
             if not isinstance(data, dict) or data.get("s") != "ok":
                 msg = data.get("s") if isinstance(data, dict) else str(data)[:120]
-                return {"error": f"Finnhub candle 返回异常: {msg}"}
+                raise DownloaderError(f"Finnhub candle 返回异常: {msg}")
 
             t: List[int] = data.get("t", [])
             o = data.get("o", [])
@@ -107,7 +105,7 @@ class FinnhubDownloader(BaseDownloader):
             c = data.get("c", [])
             v = data.get("v", [])
             if not t:
-                return {"error": f"{symbol}: 无价格数据"}
+                raise DownloaderError(f"{symbol}: 无价格数据")
 
             dates = [datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") for ts in t]
             price = PriceData(
@@ -142,7 +140,9 @@ class FinnhubDownloader(BaseDownloader):
         except Exception as e:
             err = f"Finnhub 价格下载失败 {symbol}: {e}"
             self.logger.error(err)
-            return {"error": err}
+            if isinstance(e, DownloaderError):
+                raise
+            raise DownloaderError(err)
 
     # ---------- 财务内部实现 ----------
     def _get_json(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -155,11 +155,9 @@ class FinnhubDownloader(BaseDownloader):
 
     def _download_financial_data_internal(self, symbol: str) -> Union[FinancialData, Dict[str, str]]:
         if not self.api_key:
-            return {
-                "error": (
-                    "缺少 Finnhub API Key（请设置 FINNHUB_API_KEY / FINNHUB_TOKEN，或通过构造参数 api_key 传入）"
-                )
-            }
+            raise DownloaderError(
+                "缺少 Finnhub API Key（请设置 FINNHUB_API_KEY / FINNHUB_TOKEN，或通过构造参数 api_key 传入）"
+            )
         try:
             # 公司概况
             try:
@@ -176,31 +174,18 @@ class FinnhubDownloader(BaseDownloader):
             )
 
             stmts: Dict[str, FinancialStatement] = {}
-            # 优先 financials-reported
+            # 仅使用 financials-reported，无回退到 legacy 接口
             try:
                 reported = self._get_json("stock/financials-reported", {"symbol": symbol})
                 rows = reported.get("data") if isinstance(reported, dict) else None
                 if rows:
                     self._parse_reported_rows(rows, stmts)
             except Exception as e:
+                # 保持简单：记录告警，由上层根据是否为空决定处理
                 self.logger.warning(f"financials-reported 失败: {e}")
 
-            # 回退 legacy financials 接口
             if not stmts:
-                for endpoint, key, stmt_param in (
-                    ("stock/financials", "income_statement", "ic"),
-                    ("stock/financials", "balance_sheet", "bs"),
-                    ("stock/financials", "cash_flow", "cf"),
-                ):
-                    try:
-                        raw = self._get_json(endpoint, {"symbol": symbol, "statement": stmt_param, "freq": "annual"})
-                        rows = raw.get("financials") if isinstance(raw, dict) else None
-                        if rows:
-                            stmt = self._rows_to_statement_legacy(key, rows)
-                            if stmt and stmt.periods:
-                                stmts[key] = stmt
-                    except Exception as ex:
-                        self.logger.warning(f"获取 {endpoint}({stmt_param}) 失败: {ex}")
+                raise DownloaderError("未获取到财务报表（返回为空）")
 
             fin = FinancialData(
                 symbol=symbol,
@@ -212,7 +197,9 @@ class FinnhubDownloader(BaseDownloader):
         except Exception as e:
             err = f"Finnhub 财务下载失败 {symbol}: {e}"
             self.logger.error(err)
-            return {"error": err}
+            if isinstance(e, DownloaderError):
+                raise
+            raise DownloaderError(err)
 
     def _parse_reported_rows(self, rows: List[Dict[str, Any]], out: Dict[str, FinancialStatement]) -> None:
         # rows: [{year, period, endDate, report: { ic: [...], bs: [...], cf: [...] }}]
@@ -267,52 +254,3 @@ class FinnhubDownloader(BaseDownloader):
 
         for key, items in items_map.items():
             out[key] = FinancialStatement(statement_type=key, periods=periods, items=items)
-
-    def _rows_to_statement_legacy(self, stmt_type: str, rows: List[Dict[str, Any]]) -> FinancialStatement:
-        # rows: [{"year":..., "quarter":..., "data": [{"concept":..., "value":...}, ...]}]
-        def _to_period(r: Dict[str, Any]) -> str:
-            y = str(r.get("year", ""))
-            q = str(r.get("quarter", ""))
-            if y and q:
-                try:
-                    qn = int(q)
-                    # 简化：直接用季度末的近似日期
-                    month = 3 * qn
-                    return f"{y}-{month:02d}-28"
-                except Exception:
-                    pass
-            return y or ""
-
-        sorted_rows = sorted(rows, key=_to_period, reverse=True)
-        periods = [_to_period(r) or f"idx{i}" for i, r in enumerate(sorted_rows)]
-
-        # 收集所有概念键
-        keys: List[str] = []
-        for r in sorted_rows:
-            data_arr = r.get("data")
-            if isinstance(data_arr, list):
-                for e in data_arr:
-                    name = e.get("label") or e.get("concept") or e.get("field") or e.get("name")
-                    if name and name not in keys:
-                        keys.append(name)
-        # 填充值
-        items: Dict[str, List[Optional[float]]] = {}
-        for k in keys:
-            vals: List[Optional[float]] = []
-            for r in sorted_rows:
-                data_arr = r.get("data")
-                value: Optional[float] = None
-                if isinstance(data_arr, list):
-                    for e in data_arr:
-                        name = e.get("label") or e.get("concept") or e.get("field") or e.get("name")
-                        if name == k:
-                            try:
-                                value = float(e.get("value")) if e.get("value") not in (None, "") else None
-                            except Exception:
-                                value = None
-                            break
-                vals.append(value)
-            items[k] = vals
-
-        return FinancialStatement(statement_type=stmt_type, periods=periods, items=items)
-

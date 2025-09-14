@@ -10,25 +10,25 @@
 用法示例 Usage Examples:
 
 基础分析 Basic Analysis:
-  python stock_analysis/cli/data_analyzer.py -s AAPL
+  stock-analyze -s AAPL
 
 多股票分析 Multiple Stocks:
-  python stock_analysis/cli/data_analyzer.py -s AAPL MSFT GOOG --period 6mo
+  stock-analyze -s AAPL MSFT GOOG --period 6mo
 
 自定义分析算子 Custom Operators:
-  python stock_analysis/cli/data_analyzer.py -s AAPL --operators ma,rsi,fin_ratios,fin_health
+  stock-analyze -s AAPL --operators ma,rsi,fin_ratios,fin_health
 
 指定时间范围 Date Range:
-  python stock_analysis/cli/data_analyzer.py -s AAPL --start-date 2023-01-01 --end-date 2024-01-01
+  stock-analyze -s AAPL --start-date 2023-01-01 --end-date 2024-01-01
 
 从文件读取股票列表 From File:
-  python stock_analysis/cli/data_analyzer.py --symbols-file my_stocks.txt --period 1y
+  stock-analyze --symbols-file my_stocks.txt --period 1y
 
 自定义输出文件 Custom Output:
-  python stock_analysis/cli/data_analyzer.py -s AAPL --output my_analysis.json
+  stock-analyze -s AAPL --output my_analysis.json
 
 详细日志模式 Verbose Mode:
-  python stock_analysis/cli/data_analyzer.py -s AAPL -v
+  stock-analyze -s AAPL -v
 
 支持的分析算子 Supported Operators:
 - ma: 移动平均线 (5, 10, 20, 50日)

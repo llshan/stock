@@ -11,36 +11,36 @@ SQLite数据库查看工具 - Database Inspection Tool
 用法示例 Usage Examples:
 
 列出所有表 List All Tables:
-  python stock_analysis/cli/db_print.py list
+  stock-db list
 
 查看表结构 View Table Schema:
-  python stock_analysis/cli/db_print.py schema -t stocks
-  python stock_analysis/cli/db_print.py schema -t stock_prices
+  stock-db schema -t stocks
+  stock-db schema -t stock_prices
 
 打印表数据 Print Table Data:
-  python stock_analysis/cli/db_print.py print -t stocks
+  stock-db print -t stocks
 
 查看AAPL股票价格数据 View AAPL Price Data:
-  python stock_analysis/cli/db_print.py print -t stock_prices --where "symbol='AAPL'" --limit 10
+  stock-db print -t stock_prices --where "symbol='AAPL'" --limit 10
 
 查看最近的股票数据 View Recent Stock Data:
-  python stock_analysis/cli/db_print.py print -t stock_prices --order-by "date DESC" --limit 20
+  stock-db print -t stock_prices --order-by "date DESC" --limit 20
 
 选择特定列 Select Specific Columns:
-  python stock_analysis/cli/db_print.py print -t stock_prices --columns symbol,date,close --limit 10
+  stock-db print -t stock_prices --columns symbol,date,close --limit 10
 
 查看财务数据 View Financial Data:
-  python stock_analysis/cli/db_print.py print -t income_statement --where "symbol='AAPL'"
+  stock-db print -t income_statement --where "symbol='AAPL'"
 
 复杂查询 Complex Query:
-  python stock_analysis/cli/db_print.py print -t stock_prices \\
+  stock-db print -t stock_prices \\
     --where "symbol='AAPL' AND date >= '2024-01-01'" \\
     --columns symbol,date,open,high,low,close,volume \\
     --order-by "date DESC" \\
     --limit 50
 
 自定义数据库路径 Custom Database Path:
-  python stock_analysis/cli/db_print.py list --db-path /path/to/your/database.db
+  stock-db list --db-path /path/to/your/database.db
 
 支持的表 Available Tables:
 - stocks: 股票基本信息

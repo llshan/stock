@@ -194,25 +194,7 @@ class SQLiteStorage(BaseStorage):
         for index in indexes:
             self.cursor.execute(index)  # type: ignore
 
-        # 迁移：如旧表缺少 details 列，补充之
-        try:
-            self.cursor.execute("PRAGMA table_info(download_logs)")  # type: ignore
-            cols = [row[1] for row in self.cursor.fetchall()]  # type: ignore
-            if 'details' not in cols:
-                self.cursor.execute("ALTER TABLE download_logs ADD COLUMN details TEXT")  # type: ignore
-        except Exception:
-            pass
-
-        # 视图：提供与规范化命名一致的价格视图（兼容查询）
-        try:
-            self.cursor.execute(  # type: ignore
-                "CREATE VIEW IF NOT EXISTS price_bars AS "
-                "SELECT symbol, date, open, high, low, close, adj_close, volume, created_at "
-                "FROM stock_prices"
-            )
-        except Exception:
-            pass
-
+        # 表结构创建完成
         self.connection.commit()  # type: ignore
         self.logger.info("✅ 数据库表结构就绪")
 
@@ -507,57 +489,6 @@ class SQLiteStorage(BaseStorage):
 
     def get_financial_metrics(
         self, 
-        symbol: str, 
-        statement_type: Optional[str] = None,
-        period: Optional[str] = None,
-        metric_name: Optional[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """
-        获取财务指标数据
-        
-        Args:
-            symbol: 股票代码
-            statement_type: 报表类型（income_statement, balance_sheet, cash_flow）
-            period: 报告期
-            metric_name: 指标名称
-            
-        Returns:
-            包含财务指标数据的DataFrame
-        """
-        self._check_connection("get_financial_metrics")
-        try:
-            conditions = ["symbol = ?"]
-            params = [symbol]
-            
-            if statement_type:
-                conditions.append("statement_type = ?")
-                params.append(statement_type)
-                
-            if period:
-                conditions.append("period = ?")
-                params.append(period)
-                
-            if metric_name:
-                conditions.append("metric_name = ?")
-                params.append(metric_name)
-            
-            where_clause = " AND ".join(conditions)
-            sql = f"""
-            SELECT symbol, statement_type, period, metric_name, metric_value, created_at
-            FROM financial_metrics 
-            WHERE {where_clause}
-            ORDER BY period DESC, statement_type, metric_name
-            """
-            
-            df = pd.read_sql_query(sql, self.connection, params=params)
-            return df if not df.empty else None
-            
-        except Exception as e:
-            self.logger.error(f"❌ 获取财务指标失败 {symbol}: {e}")
-            return None
-
-    def get_statement_metrics(
-        self, 
         symbol: str,
         statement_type: str,
         period: Optional[str] = None,
@@ -575,7 +506,7 @@ class SQLiteStorage(BaseStorage):
         Returns:
             包含财务指标数据的DataFrame
         """
-        self._check_connection("get_statement_metrics")
+        self._check_connection("get_financial_metrics")
         
         # 确定表名
         table_map = {

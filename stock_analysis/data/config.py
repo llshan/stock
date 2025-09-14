@@ -21,14 +21,11 @@ class DownloaderConfig:
 
     max_retries: int = 3
     base_delay: int = 30
-    timeout: int = 120
-    rate_limit_delay: float = 1.0
     # 财务刷新阈值（天）：距离最近财报期超过该天数则重新抓取财务
     financial_refresh_days: int = 90
     # 股票增量更新阈值（天）：距离最新股票数据超过该天数则使用批量下载而非增量
     stock_incremental_threshold_days: int = 100
-    # 财务数据下载器：目前仅支持 'finnhub'
-    financial_downloader: str = 'finnhub'
+    # 财务数据下载器固定为 finnhub（无需配置）
 
 
 @dataclass
@@ -37,8 +34,6 @@ class DatabaseConfig:
 
     db_path: str = "database/stock_data.db"
     db_type: str = "sqlite"
-    connection_timeout: int = 30
-    max_connections: int = 10
     enable_foreign_keys: bool = True
 
 
@@ -48,7 +43,6 @@ class BatchConfig:
 
     batch_size: int = 100
     delay_between_requests: int = 2
-    max_concurrent_downloads: int = 5
     enable_progress_logging: bool = True
 
 
@@ -74,7 +68,6 @@ class DataServiceConfig:
 
     # 基础配置
     default_start_date: str = "2000-01-01"
-    default_data_source: str = "stooq"  # 统一使用 stooq 进行价格数据下载
 
     # 子配置
     downloader: DownloaderConfig = field(default_factory=DownloaderConfig)
@@ -107,20 +100,12 @@ class DataServiceConfig:
         else:
             config.database.db_path = os.getenv('DATA_SERVICE_DB_PATH', config.database.db_path)
 
-        config.database.db_type = os.getenv('DATA_SERVICE_DB_TYPE', config.database.db_type)
-
         # 下载器配置
         config.downloader.max_retries = int(
             os.getenv('DATA_SERVICE_MAX_RETRIES', config.downloader.max_retries)
         )
         config.downloader.base_delay = int(
             os.getenv('DATA_SERVICE_BASE_DELAY', config.downloader.base_delay)
-        )
-        config.downloader.timeout = int(
-            os.getenv('DATA_SERVICE_TIMEOUT', config.downloader.timeout)
-        )
-        config.downloader.financial_downloader = os.getenv(
-            'DATA_SERVICE_FINANCIAL_DOWNLOADER', config.downloader.financial_downloader
         )
         config.downloader.stock_incremental_threshold_days = int(
             os.getenv('DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS', config.downloader.stock_incremental_threshold_days)
@@ -143,9 +128,6 @@ class DataServiceConfig:
         config.default_start_date = os.getenv(
             'DATA_SERVICE_DEFAULT_START_DATE', config.default_start_date
         )
-        config.default_data_source = os.getenv(
-            'DATA_SERVICE_DEFAULT_SOURCE', config.default_data_source
-        )
 
         return config
 
@@ -165,8 +147,6 @@ class DataServiceConfig:
         # 基础配置
         if 'default_start_date' in config_dict:
             config.default_start_date = config_dict['default_start_date']
-        if 'default_data_source' in config_dict:
-            config.default_data_source = config_dict['default_data_source']
 
         # 下载器配置
         if 'downloader' in config_dict:
@@ -212,24 +192,20 @@ class DataServiceConfig:
         """转换为字典格式"""
         return {
             'default_start_date': self.default_start_date,
-            'default_data_source': self.default_data_source,
             'downloader': {
                 'max_retries': self.downloader.max_retries,
                 'base_delay': self.downloader.base_delay,
-                'timeout': self.downloader.timeout,
-                'rate_limit_delay': self.downloader.rate_limit_delay,
+                'financial_refresh_days': self.downloader.financial_refresh_days,
+                'stock_incremental_threshold_days': self.downloader.stock_incremental_threshold_days,
             },
             'database': {
                 'db_path': self.database.db_path,
                 'db_type': self.database.db_type,
-                'connection_timeout': self.database.connection_timeout,
-                'max_connections': self.database.max_connections,
                 'enable_foreign_keys': self.database.enable_foreign_keys,
             },
             'batch': {
                 'batch_size': self.batch.batch_size,
                 'delay_between_requests': self.batch.delay_between_requests,
-                'max_concurrent_downloads': self.batch.max_concurrent_downloads,
                 'enable_progress_logging': self.batch.enable_progress_logging,
             },
             'quality': {
@@ -258,32 +234,21 @@ class DataServiceConfig:
         downloader_keys = [
             'max_retries',
             'base_delay',
-            'timeout',
-            'rate_limit_delay',
+            'financial_refresh_days',
+            'stock_incremental_threshold_days',
         ]
         for key in downloader_keys:
             if key in kwargs:
                 setattr(self.downloader, key, kwargs.pop(key))
 
         # 支持直接更新数据库参数
-        database_keys = [
-            'db_path',
-            'db_type',
-            'connection_timeout',
-            'max_connections',
-            'enable_foreign_keys',
-        ]
+        database_keys = ['db_path', 'db_type', 'enable_foreign_keys']
         for key in database_keys:
             if key in kwargs:
                 setattr(self.database, key, kwargs.pop(key))
 
         # 支持直接更新批量参数
-        batch_keys = [
-            'batch_size',
-            'delay_between_requests',
-            'max_concurrent_downloads',
-            'enable_progress_logging',
-        ]
+        batch_keys = ['batch_size', 'delay_between_requests', 'enable_progress_logging']
         for key in batch_keys:
             if key in kwargs:
                 setattr(self.batch, key, kwargs.pop(key))

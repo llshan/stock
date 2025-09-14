@@ -128,7 +128,7 @@ analysis_service = AnalysisService()
 
 # 下载股票数据
 result = data_service.download_and_store_stock_data('AAPL')
-print(f"Downloaded {result['data_points']} data points")
+print(f"Downloaded {result.data_points} data points")
 
 # 技术分析
 analysis_result = analysis_service.run_analysis(['AAPL'], period='1y')
@@ -179,9 +179,6 @@ export FINNHUB_API_KEY="your_finnhub_api_key"
 # 设置股票增量更新阈值（天）
 export DATA_SERVICE_STOCK_INCREMENTAL_THRESHOLD_DAYS="100"
 
-# 设置财务数据下载器
-export DATA_SERVICE_FINANCIAL_DOWNLOADER="finnhub"
-
 # 设置默认关注股票列表
 export WATCHLIST="AAPL,GOOG,MSFT,TSLA"
 
@@ -200,7 +197,6 @@ database:
 downloader:
   stock_incremental_threshold_days: 100
   financial_refresh_days: 90
-  financial_downloader: "finnhub"
   max_retries: 3
   base_delay: 30
 
