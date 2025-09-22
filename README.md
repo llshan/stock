@@ -21,6 +21,16 @@
 - **趋势分析**: 自动识别股票趋势和信号
 - **风险提醒**: 股价异常波动预警
 
+### 💹 批次级别交易追踪（v2.0新增）
+- **批次追踪**: 每次买入创建独立批次，支持精确成本基础计算
+- **多种成本基础方法**: FIFO、LIFO、SpecificLot、AverageCost四种方法
+- **卖出分配**: 详细记录每笔卖出对应的批次分配和已实现盈亏
+- **税务报告**: 生成符合税务申报要求的成本基础明细
+- **成本基础模拟**: 比较不同方法的税负影响，助力投资决策
+- **高性能查询**: 批量查询、分页支持、优化索引
+- **数据一致性**: 完整的验证机制确保批次与交易记录一致
+- **向后兼容**: 保持与传统平均成本法的兼容性
+
 ### 🔧 现代化架构
 - **标准Python包**: 可pip安装，无路径依赖
 - **命令行工具**: 专业的CLI界面
@@ -92,6 +102,95 @@ stock-db schema -t stocks
 # 查看表数据
 stock-db print -t stocks --limit 10
 ```
+
+#### 5. 批次级别交易管理（v2.0）
+```bash
+# 基础交易记录
+stock-trading buy  --user-id u1 -s AAPL -q 100 -p 150.50 -d 2024-01-15 --commission 9.95
+stock-trading sell --user-id u1 -s AAPL -q  20 -p 160.00 -d 2024-02-01
+
+# 批次级别卖出（支持多种成本基础方法）
+stock-trading sell --user-id u1 -s AAPL -q 30 -p 160.0 -d 2024-02-01 --basis fifo
+stock-trading sell --user-id u1 -s AAPL -q 30 -p 160.0 -d 2024-02-01 --basis lifo
+stock-trading sell --user-id u1 -s AAPL -q 30 -p 160.0 -d 2024-02-01 --basis specific --specific-lots "lot=1:20,lot=2:10"
+
+# 查看持仓和批次详情
+stock-trading positions --user-id u1                    # 持仓汇总
+stock-trading lots --user-id u1 -s AAPL                # 查看AAPL的所有批次
+stock-trading sales --user-id u1 -s AAPL               # 查看AAPL的卖出分配历史
+
+# 盈亏计算
+stock-trading calculate-pnl --user-id u1 --date 2024-02-20
+stock-trading batch-calculate --user-id u1 --start-date 2024-01-01 --end-date 2024-02-29
+stock-trading daily --user-id u1                       # 今日盈亏（适合cron定时）
+
+# 高级分析功能
+stock-trading portfolio --user-id u1 --as-of-date 2024-02-29                    # 投资组合摘要
+stock-trading tax-report --user-id u1 --start-date 2024-01-01 --end-date 2024-12-31  # 税务报告
+stock-trading rebalance-simulate --user-id u1 -s AAPL -q 50 -p 180.0           # 成本基础模拟
+```
+
+**成本基础方法说明：**
+- `fifo`: 先进先出（默认，税务常用）
+- `lifo`: 后进先出（税务优化）
+- `specific`: 指定批次（最大灵活性）
+- `average`: 平均成本法（向后兼容）
+
+**批次级别特性：**
+- 每次买入自动创建独立批次，支持精确成本基础计算
+- 卖出时详细记录批次分配，提供完整的已实现盈亏审计轨迹
+- 支持税务申报所需的成本基础明细报告
+- 数据一致性验证确保批次与交易记录完全匹配
+
+### 系统升级与迁移
+#### 数据库迁移（已有数据库升级到批次级别）
+```bash
+# 1. 备份现有数据库
+cp database/stock_data.db database/stock_data_backup_$(date +%Y%m%d).db
+
+# 2. 执行表结构升级
+python tools/migrate_add_trading_tables.py --db-path database/stock_data.db
+
+# 3. 迁移到批次级别系统（可选）
+python tools/migrate_to_lot_tracking.py --db-path database/stock_data.db --dry-run  # 预览
+python tools/migrate_to_lot_tracking.py --db-path database/stock_data.db            # 执行
+
+# 4. 验证迁移结果
+python tools/post_migration_validation.py --db-path database/stock_data.db
+```
+
+详细迁移指南请参阅：[docs/migration_guide.md](docs/migration_guide.md)
+
+#### 批次级别配置
+```python
+# stock_analysis/trading/config.py
+TRADING_CONFIG = {
+    # 批次追踪设置
+    'enable_lot_tracking': True,
+    'default_cost_basis_method': 'FIFO',  # FIFO/LIFO/SpecificLot/AverageCost
+    
+    # 精度设置  
+    'decimal_precision': 4,
+    'enable_precise_calculations': True,
+    
+    # 性能设置
+    'batch_query_size': 1000,
+    'pagination_size': 100,
+    
+    # 安全设置
+    'max_user_id_length': 50,
+    'max_calculation_days': 3650,  # 10年
+    'enable_external_id_validation': True
+}
+```
+
+#### 常用CLI选项
+- `--db-path`: 指定数据库路径（默认 `database/stock_data.db`）
+- `--price-source adj_close|close`: 估值价源（默认 `adj_close`）
+- `--only-trading-days`: 批量计算时仅按交易日计算
+- `--basis fifo|lifo|specific|average`: 成本基础方法
+- `--specific-lots "lot=1:20,lot=2:10"`: 指定批次卖出
+- `--external-id`: 外部业务ID（用于去重）
 
 ## 📦 项目结构
 
@@ -205,6 +304,62 @@ analysis:
   operators: ["ma", "rsi", "fin_ratios", "fin_health", "drop_alert"]
 ```
 
+### 交易模块配置
+
+交易模块提供灵活的配置选项，支持不同的使用场景：
+
+```python
+from stock_analysis.trading import TransactionService, PnLCalculator
+from stock_analysis.trading.config import TradingConfig, CostBasisMethod
+
+# 基础配置（推荐生产环境）
+config = TradingConfig(
+    cost_basis_method=CostBasisMethod.AVERAGE_COST,  # 平均成本法
+    only_trading_days=True,                          # 仅交易日计算，减少回填
+    max_user_id_length=100,                         # 用户ID长度限制
+    max_quantity_per_transaction=10_000_000         # 单笔交易量限制
+)
+
+# 在服务中使用配置
+transaction_service = TransactionService(config=config)
+pnl_calculator = PnLCalculator(config=config)
+```
+
+#### 核心配置项
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `cost_basis_method` | `AVERAGE_COST` | 成本计算方法（当前支持平均成本法） |
+| `only_trading_days` | `False` | 是否仅在交易日计算盈亏 |
+| `price_source` | `ADJ_CLOSE` | 价格来源（复权收盘价） |
+| `missing_price_strategy` | `BACKFILL` | 缺失价格处理策略 |
+| `max_user_id_length` | `100` | 用户ID最大长度 |
+| `max_quantity_per_transaction` | `10,000,000` | 单笔交易最大数量 |
+| `max_calculation_days` | `3,650` | 最大计算时间跨度（10年） |
+
+#### 实践建议
+
+**生产环境配置**:
+```python
+production_config = TradingConfig(
+    only_trading_days=True,        # 减少回填，提高性能
+    max_calculation_days=1825,     # 限制为5年，控制计算量
+    price_precision=4,             # 适当精度
+    amount_precision=2             # 标准货币精度
+)
+```
+
+**开发测试配置**:
+```python
+dev_config = TradingConfig(
+    only_trading_days=False,       # 包含周末便于测试
+    max_user_id_length=50,         # 严格限制发现问题
+    max_quantity_per_transaction=1_000_000  # 较低限制
+)
+```
+
+详细配置指南请参考：[交易配置指南](docs/trading_config_guide.md)
+
 ## 📊 支持的技术指标
 
 ### 当前指标
@@ -249,6 +404,9 @@ source venv/bin/activate  # Linux/Mac
 
 # 安装开发依赖
 pip install -e ".[dev]"
+
+# 运行交易模块测试
+pytest -q tests/trading
 ```
 
 ### 代码风格

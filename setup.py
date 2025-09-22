@@ -73,6 +73,7 @@ setup(
             'stock-analyze=stock_analysis.cli.data_analyzer:main', 
             'stock-db=stock_analysis.cli.db_print:main',
             'financial-metrics=stock_analysis.cli.financial_metrics:main',
+            'stock-trading=stock_analysis.cli.trading_manager:main',
         ],
     },
     

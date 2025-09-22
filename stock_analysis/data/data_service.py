@@ -55,27 +55,6 @@ class DataService:
 
         self.logger = logging.getLogger(__name__)
 
-    def get_last_update_date(self, symbol: str) -> Optional[str]:
-        """
-        获取股票的最后更新日期
-
-        Args:
-            symbol: 股票代码
-
-        Returns:
-            最后更新日期，如果没有记录则返回None
-        """
-        try:
-            last_date = self.storage.get_last_update_date(symbol)
-            if last_date:
-                last_dt = datetime.strptime(last_date, '%Y-%m-%d')
-                next_date = last_dt + timedelta(days=1)
-                return next_date.strftime('%Y-%m-%d')
-            return None
-        except Exception as e:
-            self.logger.warning(f"获取 {symbol} 最后更新日期失败: {str(e)}")
-            return None
-
     def download_and_store_stock_data(
         self, symbol: str, start_date: Optional[str] = None
     ) -> DownloadResult:
@@ -93,7 +72,7 @@ class DataService:
             self.logger.info(f"📈 开始下载并存储 {symbol} 股票数据")
             self._ensure_stock_record(symbol)
 
-            # 获取已有最新日期
+            # 获取数据库中最后一条记录的日期
             try:
                 raw_last = self.storage.get_last_update_date(symbol)
             except Exception:
@@ -112,6 +91,7 @@ class DataService:
                         metadata={'no_new_data': True},
                     )
 
+            # 计算下载开始日期：从最后记录的下一天开始
             actual_start = (
                 (datetime.strptime(raw_last, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
                 if raw_last
@@ -349,13 +329,13 @@ class DataService:
 
         # 直接创建空的股票记录，避免不必要的财务数据下载
         try:
-            # Use hasattr to check if the storage implementation has this method
-            if hasattr(self.storage, '_ensure_stock_exists'):
-                self.storage._ensure_stock_exists(symbol)
+            # 使用公有方法确保股票记录存在
+            if hasattr(self.storage, 'ensure_stock_exists'):
+                self.storage.ensure_stock_exists(symbol)
                 self.logger.info(f"🪪 已创建空股票记录: {symbol}")
             else:
                 self.logger.warning(
-                    f"Storage implementation does not support _ensure_stock_exists for {symbol}"
+                    f"Storage implementation does not support ensure_stock_exists for {symbol}"
                 )
         except Exception as e:
             self.logger.error(f"❌ 创建股票记录失败 {symbol}: {e}")

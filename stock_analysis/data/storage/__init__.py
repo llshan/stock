@@ -8,6 +8,7 @@ from typing import Any
 
 from .base import BaseStorage, StorageError
 from .sqlite_storage import SQLiteStorage
+from .config import StorageConfig, QueryBuilder
 
 
 # 存储工厂函数
@@ -39,4 +40,4 @@ def create_storage(storage_type: str = "sqlite", **kwargs: Any) -> BaseStorage:
     return storage_class(**kwargs)
 
 
-__all__ = ['BaseStorage', 'StorageError', 'SQLiteStorage', 'create_storage']
+__all__ = ['BaseStorage', 'StorageError', 'SQLiteStorage', 'StorageConfig', 'QueryBuilder', 'create_storage']

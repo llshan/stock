@@ -25,7 +25,6 @@ class DownloaderConfig:
     financial_refresh_days: int = 90
     # 股票增量更新阈值（天）：距离最新股票数据超过该天数则使用批量下载而非增量
     stock_incremental_threshold_days: int = 100
-    # 财务数据下载器固定为 finnhub（无需配置）
 
 
 @dataclass
@@ -78,7 +77,7 @@ class DataServiceConfig:
     # 日志配置
     log_level: str = "INFO"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    enable_file_logging: bool = False
+    enable_file_logging: bool = True
     log_file_path: str = "data_service.log"
 
     @classmethod
