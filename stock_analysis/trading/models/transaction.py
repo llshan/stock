@@ -13,12 +13,12 @@ from ..utils.decimal_utils import to_quantity_decimal, to_price_decimal, to_fina
 @dataclass
 class Transaction:
     """股票交易记录模型"""
-    user_id: str                       # 用户ID
     symbol: str                        # 股票代码
     transaction_type: str              # 交易类型: 'BUY', 'SELL'
     quantity: Decimal                  # 交易数量
     price: Decimal                     # 交易价格
     transaction_date: str              # 交易日期（YYYY-MM-DD格式）
+    platform: Optional[str] = None     # 交易平台: 'ml', 'schwab', etc.
     external_id: Optional[str] = None  # 外部业务ID，用于去重
     notes: Optional[str] = None        # 备注
     id: Optional[int] = None           # 数据库ID
@@ -52,12 +52,13 @@ class Transaction:
         """转换为字典格式"""
         return {
             'id': self.id,
-            'user_id': self.user_id,
             'symbol': self.symbol,
             'transaction_type': self.transaction_type,
             'quantity': self.quantity,
             'price': self.price,
             'transaction_date': self.transaction_date,
+            'platform': self.platform,
+            'external_id': self.external_id,
             'notes': self.notes,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -84,12 +85,13 @@ class Transaction:
         
         return cls(
             id=data.get('id'),
-            user_id=data['user_id'],
             symbol=data['symbol'],
             transaction_type=data['transaction_type'],
             quantity=data['quantity'],
             price=data['price'],
             transaction_date=data['transaction_date'],
+            platform=data.get('platform'),
+            external_id=data.get('external_id'),
             notes=data.get('notes'),
             created_at=created_at,
             updated_at=updated_at,

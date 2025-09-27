@@ -20,6 +20,10 @@
 详细配置指南请参考：docs/trading_config_guide.md
 """
 
+# 高级Facades
+from .services import TransactionService, PortfolioService
+from .calculators import PnLCalculator
+
 # 批次级别API
 from .services.lot_transaction_service import LotTransactionService
 from .calculators.lot_pnl_calculator import LotPnLCalculator
@@ -37,6 +41,11 @@ from .config import (
 )
 
 __all__ = [
+    # 高级Facades
+    'TransactionService',
+    'PortfolioService',
+    'PnLCalculator',
+
     # 批次级别API
     'LotTransactionService',
     'LotPnLCalculator',

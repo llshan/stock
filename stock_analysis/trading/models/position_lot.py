@@ -21,14 +21,13 @@ class PositionLot:
     - cost_basis: 每股成本基础
     """
     
-    id: Optional[int] = None
-    user_id: str                       # 用户ID
     symbol: str                        # 股票代码
     transaction_id: int                # 关联的买入交易ID
     original_quantity: Decimal         # 原始买入数量
     remaining_quantity: Decimal        # 剩余数量（卖出后减少）
     cost_basis: Decimal               # 每股成本基础
     purchase_date: str                # 买入日期（YYYY-MM-DD）
+    id: Optional[int] = None
     is_closed: bool = False           # 是否已完全卖出
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

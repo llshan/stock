@@ -19,7 +19,6 @@ class PositionSummary:
     - 同时保留批次级别的详细信息
     """
     
-    user_id: str
     symbol: str
     total_quantity: float           # 总持仓数量（所有批次剩余数量之和）
     total_cost: float              # 总成本（所有批次成本之和）
@@ -30,11 +29,10 @@ class PositionSummary:
     closed_lot_count: int          # 已关闭批次数量
     
     @classmethod
-    def from_lots(cls, user_id: str, symbol: str, lots: List[PositionLot]) -> 'PositionSummary':
+    def from_lots(cls, symbol: str, lots: List[PositionLot]) -> 'PositionSummary':
         """从批次列表计算汇总信息"""
         if not lots:
             return cls(
-                user_id=user_id,
                 symbol=symbol,
                 total_quantity=0.0,
                 total_cost=0.0,
@@ -60,7 +58,6 @@ class PositionSummary:
         closed_lot_count = len([lot for lot in lots if lot.is_closed])
         
         return cls(
-            user_id=user_id,
             symbol=symbol,
             total_quantity=total_quantity,
             total_cost=total_cost,

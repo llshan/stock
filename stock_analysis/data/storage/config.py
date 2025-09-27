@@ -113,19 +113,18 @@ class StorageConfig:
         # 交易记录字段
         class Transactions:
             ID = "id"
-            USER_ID = "user_id"
             EXTERNAL_ID = "external_id"  # 新增：外部业务ID，用于去重
             TRANSACTION_TYPE = "transaction_type"
             QUANTITY = "quantity"
             PRICE = "price"
             TRANSACTION_DATE = "transaction_date"
+            PLATFORM = "platform"  # 新增：交易平台
             LOT_ID = "lot_id"  # 新增：关联批次ID
             NOTES = "notes"
         
         # 持仓记录字段
         class Positions:
             ID = "id"
-            USER_ID = "user_id"
             QUANTITY = "quantity"
             AVG_COST = "avg_cost"
             TOTAL_COST = "total_cost"
@@ -136,7 +135,6 @@ class StorageConfig:
         # 每日盈亏字段
         class DailyPnL:
             ID = "id"
-            USER_ID = "user_id"
             VALUATION_DATE = "valuation_date"
             QUANTITY = "quantity"
             AVG_COST = "avg_cost"
@@ -153,7 +151,6 @@ class StorageConfig:
         # 持仓批次字段（新增）
         class PositionLots:
             ID = "id"
-            USER_ID = "user_id"
             TRANSACTION_ID = "transaction_id"
             ORIGINAL_QUANTITY = "original_quantity"
             REMAINING_QUANTITY = "remaining_quantity"
@@ -244,8 +241,8 @@ class StorageConfig:
     
     # ============= 索引定义 =============
     @classmethod
-    def get_all_indexes(cls) -> List[str]:
-        """获取所有索引创建语句"""
+    def get_core_indexes(cls) -> List[str]:
+        """获取核心表索引创建语句"""
         T = cls.Tables
         F = cls.Fields
         
@@ -258,15 +255,24 @@ class StorageConfig:
             f"CREATE INDEX IF NOT EXISTS idx_{T.BALANCE_SHEET}_metric_name ON {T.BALANCE_SHEET} ({F.FinancialStatement.METRIC_NAME})",
             f"CREATE INDEX IF NOT EXISTS idx_{T.CASH_FLOW}_metric_name ON {T.CASH_FLOW} ({F.FinancialStatement.METRIC_NAME})",
             f"CREATE INDEX IF NOT EXISTS idx_{T.DOWNLOAD_LOGS}_symbol ON {T.DOWNLOAD_LOGS} ({F.SYMBOL})",
-            
-            # 交易相关索引（批次追踪索引由 ensure_lot_tracking_tables() 单独创建）
-            f"CREATE INDEX IF NOT EXISTS idx_{T.TRANSACTIONS}_user_date ON {T.TRANSACTIONS} ({F.Transactions.USER_ID}, {F.Transactions.TRANSACTION_DATE})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.TRANSACTIONS}_user_symbol_date ON {T.TRANSACTIONS} ({F.Transactions.USER_ID}, {F.SYMBOL}, {F.Transactions.TRANSACTION_DATE})",
-            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_{T.TRANSACTIONS}_user_external ON {T.TRANSACTIONS} ({F.Transactions.USER_ID}, {F.Transactions.EXTERNAL_ID}) WHERE {F.Transactions.EXTERNAL_ID} IS NOT NULL",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.TRANSACTIONS}_type ON {T.TRANSACTIONS} ({F.Transactions.TRANSACTION_TYPE})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITIONS}_user ON {T.POSITIONS} ({F.Positions.USER_ID})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.DAILY_PNL}_user_date ON {T.DAILY_PNL} ({F.DailyPnL.USER_ID}, {F.DailyPnL.VALUATION_DATE})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.DAILY_PNL}_user_symbol ON {T.DAILY_PNL} ({F.DailyPnL.USER_ID}, {F.SYMBOL})",
+        ]
+
+    @classmethod
+    def get_trading_and_lot_indexes(cls) -> List[str]:
+        """获取交易和批次追踪表索引创建语句"""
+        T = cls.Tables
+        F = cls.Fields
+
+        return [
+            f"CREATE INDEX IF NOT EXISTS idx_{T.TRANSACTIONS}_date ON {T.TRANSACTIONS} ({F.Transactions.TRANSACTION_DATE})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.TRANSACTIONS}_symbol_date ON {T.TRANSACTIONS} ({F.SYMBOL}, {F.Transactions.TRANSACTION_DATE})",
+            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_{T.TRANSACTIONS}_external ON {T.TRANSACTIONS} ({F.Transactions.EXTERNAL_ID}) WHERE {F.Transactions.EXTERNAL_ID} IS NOT NULL",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITIONS}_symbol ON {T.POSITIONS} ({F.SYMBOL})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.DAILY_PNL}_date ON {T.DAILY_PNL} ({F.DailyPnL.VALUATION_DATE})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.DAILY_PNL}_symbol ON {T.DAILY_PNL} ({F.SYMBOL})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_symbol ON {T.POSITION_LOTS} ({F.SYMBOL})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_symbol_date ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.PURCHASE_DATE})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_active ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.IS_CLOSED})",
         ]
     
     # ============= 验证方法 =============

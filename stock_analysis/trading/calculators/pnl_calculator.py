@@ -39,13 +39,12 @@ class PnLCalculator:
         # 使用批次级别计算器作为底层实现
         self.lot_calculator = LotPnLCalculator(storage, config)
     
-    def calculate_daily_pnl(self, user_id: str, symbol: str, 
+    def calculate_daily_pnl(self, symbol: str, 
                            calculation_date: str) -> Optional[DailyPnL]:
         """
         计算指定日期的盈亏（基于批次级别计算）
         
         Args:
-            user_id: 用户ID
             symbol: 股票代码
             calculation_date: 计算日期（YYYY-MM-DD格式）
             
@@ -54,7 +53,7 @@ class PnLCalculator:
         """
         # 委托给批次级别计算器处理
         daily_pnl = self.lot_calculator.calculate_daily_pnl(
-            user_id, symbol, calculation_date, self.price_field
+            symbol, calculation_date, self.price_field
         )
         
         if daily_pnl:
@@ -64,24 +63,22 @@ class PnLCalculator:
         
         return daily_pnl
     
-    def calculate_all_positions_pnl(self, user_id: str, 
-                                   calculation_date: str) -> List[DailyPnL]:
+    def calculate_all_positions_pnl(self, calculation_date: str) -> List[DailyPnL]:
         """
         计算用户所有持仓在指定日期的盈亏
         
         Args:
-            user_id: 用户ID
             calculation_date: 计算日期（YYYY-MM-DD格式）
             
         Returns:
             List[DailyPnL]: 所有持仓的盈亏记录列表
         """
-        self.logger.info(f"计算所有持仓盈亏: {user_id} {calculation_date}")
+        self.logger.info(f"计算所有持仓盈亏: {calculation_date}")
         
         # 直接获取所有活跃持仓的股票代码，不再经过Position汇总
-        symbols = self.transaction_service.get_active_symbols(user_id)
+        symbols = self.transaction_service.get_active_symbols()
         if not symbols:
-            self.logger.info(f"用户无活跃持仓: {user_id}")
+            self.logger.info(f"无持仓")
             return []
         
         daily_pnls = []
@@ -89,7 +86,7 @@ class PnLCalculator:
         for symbol in symbols:
             try:
                 daily_pnl = self.calculate_daily_pnl(
-                    user_id, symbol, calculation_date
+                    symbol, calculation_date
                 )
                 if daily_pnl:
                     daily_pnls.append(daily_pnl)
@@ -100,13 +97,12 @@ class PnLCalculator:
         self.logger.info(f"✅ 完成所有持仓盈亏计算: {len(daily_pnls)}/{len(symbols)}")
         return daily_pnls
     
-    def batch_calculate_historical_pnl(self, user_id: str, start_date: str, 
+    def batch_calculate_historical_pnl(self, start_date: str, 
                                       end_date: str, symbols: List[str] = None) -> Dict[str, int]:
         """
         批量计算历史盈亏数据（基于批次级别计算）
         
         Args:
-            user_id: 用户ID
             start_date: 开始日期（YYYY-MM-DD格式）
             end_date: 结束日期（YYYY-MM-DD格式）
             symbols: 指定股票代码列表，如果为None则计算所有持仓
@@ -114,14 +110,14 @@ class PnLCalculator:
         Returns:
             Dict[str, int]: 计算结果统计 {'total_days': 总天数, 'calculated_records': 计算记录数}
         """
-        self.logger.info(f"批量计算历史盈亏: {user_id} {start_date} 至 {end_date}")
+        self.logger.info(f"批量计算历史盈亏: {start_date} 至 {end_date}")
         
         # 校验输入参数
-        self._validate_calculation_inputs(user_id, start_date, end_date)
+        self._validate_calculation_inputs(start_date, end_date)
         
         if symbols is None:
-            # 获取用户的所有活跃股票代码（不再依赖Position汇总对象）
-            symbols = self.transaction_service.get_active_symbols(user_id)
+            # 获取所有活跃持仓的股票代码
+            symbols = self.transaction_service.get_active_symbols()
         
         if not symbols:
             self.logger.info("无持仓股票，跳过批量计算")
@@ -129,7 +125,7 @@ class PnLCalculator:
         
         # 委托给批次级别计算器进行批量计算
         result_by_symbol = self.lot_calculator.batch_calculate_daily_pnl(
-            user_id, symbols, start_date, end_date, self.price_field, self.only_trading_days
+            symbols, start_date, end_date, self.price_field, self.only_trading_days
         )
         
         # 统计结果
@@ -137,8 +133,8 @@ class PnLCalculator:
         for symbol_results in result_by_symbol.values():
             calculated_records += len(symbol_results)
         
-        # 计算总天数（为指定symbols生成联合交易日）
-        date_range = self._generate_date_range(start_date, end_date, symbols)
+        # 计算总天数
+        date_range = self._generate_date_range(start_date, end_date)
         
         result = {
             'total_days': len(date_range),
@@ -149,20 +145,19 @@ class PnLCalculator:
         self.logger.info(f"✅ 批量计算完成: {result}")
         return result
     
-    def recalculate_position_pnl(self, user_id: str, symbol: str, 
+    def recalculate_position_pnl(self, symbol: str, 
                                 recompute_days: int = 7) -> int:
         """
         重新计算指定持仓的最近N天盈亏
         
         Args:
-            user_id: 用户ID
             symbol: 股票代码
             recompute_days: 重算天数，默认最近7天
             
         Returns:
             int: 重算的记录数
         """
-        self.logger.info(f"重算持仓盈亏: {user_id} {symbol} 最近{recompute_days}天")
+        self.logger.info(f"重算持仓盈亏: {symbol} 最近{recompute_days}天")
         
         # 计算日期范围
         end_date = date.today()
@@ -170,7 +165,6 @@ class PnLCalculator:
         
         # 批量重算
         result = self.batch_calculate_historical_pnl(
-            user_id, 
             start_date.strftime('%Y-%m-%d'),
             end_date.strftime('%Y-%m-%d'),
             [symbol]
@@ -356,15 +350,8 @@ class PnLCalculator:
         if not self.storage or not hasattr(self.storage, 'cursor') or not self.storage.cursor:
             raise RuntimeError(f"{method_name}: 存储连接不可用")
     
-    def _validate_calculation_inputs(self, user_id: str, start_date: str, end_date: str):
+    def _validate_calculation_inputs(self, start_date: str, end_date: str):
         """校验计算输入参数"""
-        # 用户ID校验
-        if not user_id or not user_id.strip():
-            raise ValueError("盈亏计算错误：用户ID不能为空")
-        
-        if len(user_id.strip()) > self.config.max_user_id_length:
-            raise ValueError(f"盈亏计算错误：用户ID长度不能超过{self.config.max_user_id_length}个字符")
-        
         # 日期格式校验
         try:
             start_dt = datetime.strptime(start_date, '%Y-%m-%d')

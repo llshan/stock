@@ -53,7 +53,6 @@ class TradingConfig:
     amount_precision: int = 2        # 金额精度（小数位）
     
     # 输入校验限制配置
-    max_user_id_length: int = 100    # 用户ID最大长度（放宽至100字符）
     max_symbol_length: int = 20      # 股票代码最大长度
     max_quantity_per_transaction: float = 10_000_000  # 单笔交易最大数量（1千万股）
     max_price_per_share: float = 1_000_000  # 单股最大价格（100万元/股）
@@ -130,7 +129,6 @@ class TradingConfig:
             'recompute_window_days': self.recompute_window_days,
             'price_precision': self.price_precision,
             'amount_precision': self.amount_precision,
-            'max_user_id_length': self.max_user_id_length,
             'max_symbol_length': self.max_symbol_length,
             'max_quantity_per_transaction': self.max_quantity_per_transaction,
             'max_price_per_share': self.max_price_per_share,
@@ -151,7 +149,6 @@ class TradingConfig:
             recompute_window_days=data.get('recompute_window_days', 7),
             price_precision=data.get('price_precision', 4),
             amount_precision=data.get('amount_precision', 2),
-            max_user_id_length=data.get('max_user_id_length', 100),
             max_symbol_length=data.get('max_symbol_length', 20),
             max_quantity_per_transaction=data.get('max_quantity_per_transaction', 10_000_000),
             max_price_per_share=data.get('max_price_per_share', 1_000_000),

@@ -37,7 +37,7 @@ class SQLiteSchemaManager:
         # 注意：交易表和批次追踪表由connect()方法确保创建，避免重复调用
         
         # 创建索引
-        for index_sql in self.config.get_all_indexes():
+        for index_sql in self.config.get_core_indexes():
             self.cursor.execute(index_sql)
         
         self.connection.commit()
@@ -86,7 +86,6 @@ class SQLiteSchemaManager:
             f"""
             CREATE TABLE IF NOT EXISTS {T.POSITION_LOTS} (
                 {F.PositionLots.ID} INTEGER PRIMARY KEY AUTOINCREMENT,
-                {F.PositionLots.USER_ID} TEXT NOT NULL,
                 {F.SYMBOL} TEXT NOT NULL,
                 {F.PositionLots.TRANSACTION_ID} INTEGER NOT NULL,
                 {F.PositionLots.ORIGINAL_QUANTITY} REAL NOT NULL,
@@ -123,16 +122,16 @@ class SQLiteSchemaManager:
         # 创建批次追踪相关索引（性能优化版本）
         lot_tracking_indexes = [
             # 基础查询索引
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_user_symbol ON {T.POSITION_LOTS} ({F.PositionLots.USER_ID}, {F.SYMBOL})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_user_symbol_date ON {T.POSITION_LOTS} ({F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.PURCHASE_DATE})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_symbol ON {T.POSITION_LOTS} ({F.SYMBOL})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_symbol_date ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.PURCHASE_DATE})",
             f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_transaction ON {T.POSITION_LOTS} ({F.PositionLots.TRANSACTION_ID})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_active ON {T.POSITION_LOTS} ({F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.IS_CLOSED})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_active ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.IS_CLOSED})",
             
             # 性能优化索引 - 批量查询优化
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_batch_query ON {T.POSITION_LOTS} ({F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.IS_CLOSED}, {F.PositionLots.PURCHASE_DATE})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_batch_query ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.IS_CLOSED}, {F.PositionLots.PURCHASE_DATE})",
             f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_closed_archive ON {T.POSITION_LOTS} ({F.PositionLots.IS_CLOSED}, {F.PositionLots.REMAINING_QUANTITY}, {F.CREATED_AT})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_fifo_matching ON {T.POSITION_LOTS} ({F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.IS_CLOSED}, {F.PositionLots.PURCHASE_DATE}, {F.PositionLots.ID})",
-            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_lifo_matching ON {T.POSITION_LOTS} ({F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.IS_CLOSED}, {F.PositionLots.PURCHASE_DATE} DESC, {F.PositionLots.ID})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_fifo_matching ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.IS_CLOSED}, {F.PositionLots.PURCHASE_DATE}, {F.PositionLots.ID})",
+            f"CREATE INDEX IF NOT EXISTS idx_{T.POSITION_LOTS}_lifo_matching ON {T.POSITION_LOTS} ({F.SYMBOL}, {F.PositionLots.IS_CLOSED}, {F.PositionLots.PURCHASE_DATE} DESC, {F.PositionLots.ID})",
             
             # 卖出分配索引
             f"CREATE INDEX IF NOT EXISTS idx_{T.SALE_ALLOCATIONS}_transaction ON {T.SALE_ALLOCATIONS} ({F.SaleAllocations.SALE_TRANSACTION_ID})",
@@ -159,18 +158,19 @@ class SQLiteSchemaManager:
             f"""
             CREATE TABLE IF NOT EXISTS {T.TRANSACTIONS} (
                 {F.Transactions.ID} INTEGER PRIMARY KEY AUTOINCREMENT,
-                {F.Transactions.USER_ID} TEXT NOT NULL,
                 {F.Transactions.EXTERNAL_ID} TEXT,
                 {F.SYMBOL} TEXT NOT NULL,
                 {F.Transactions.TRANSACTION_TYPE} TEXT NOT NULL CHECK ({F.Transactions.TRANSACTION_TYPE} IN ('BUY','SELL')),
                 {F.Transactions.QUANTITY} REAL NOT NULL,
                 {F.Transactions.PRICE} REAL NOT NULL,
                 {F.Transactions.TRANSACTION_DATE} TEXT NOT NULL,
+                {F.Transactions.PLATFORM} TEXT,
                 {F.Transactions.LOT_ID} INTEGER,
                 {F.Transactions.NOTES} TEXT,
                 {F.CREATED_AT} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 {F.UPDATED_AT} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY ({F.SYMBOL}) REFERENCES {T.STOCKS}({F.SYMBOL})
+                FOREIGN KEY ({F.SYMBOL}) REFERENCES {T.STOCKS}({F.SYMBOL}),
+                UNIQUE({F.Transactions.EXTERNAL_ID}) -- 幂等约束
             )
             """
         )
@@ -179,7 +179,6 @@ class SQLiteSchemaManager:
             f"""
             CREATE TABLE IF NOT EXISTS {T.POSITIONS} (
                 {F.Positions.ID} INTEGER PRIMARY KEY AUTOINCREMENT,
-                {F.Positions.USER_ID} TEXT NOT NULL,
                 {F.SYMBOL} TEXT NOT NULL,
                 {F.Positions.QUANTITY} REAL NOT NULL,
                 {F.Positions.AVG_COST} REAL NOT NULL,
@@ -189,7 +188,7 @@ class SQLiteSchemaManager:
                 {F.Positions.IS_ACTIVE} INTEGER DEFAULT 1,
                 {F.CREATED_AT} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 {F.UPDATED_AT} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE({F.Positions.USER_ID}, {F.SYMBOL})
+                UNIQUE({F.SYMBOL})
             )
             """
         )
@@ -198,7 +197,6 @@ class SQLiteSchemaManager:
             f"""
             CREATE TABLE IF NOT EXISTS {T.DAILY_PNL} (
                 {F.DailyPnL.ID} INTEGER PRIMARY KEY AUTOINCREMENT,
-                {F.DailyPnL.USER_ID} TEXT NOT NULL,
                 {F.SYMBOL} TEXT NOT NULL,
                 {F.DailyPnL.VALUATION_DATE} TEXT NOT NULL,
                 {F.DailyPnL.QUANTITY} REAL NOT NULL,
@@ -213,7 +211,7 @@ class SQLiteSchemaManager:
                 {F.DailyPnL.PRICE_DATE} TEXT,
                 {F.DailyPnL.IS_STALE_PRICE} INTEGER DEFAULT 0,
                 {F.CREATED_AT} TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE({F.DailyPnL.USER_ID}, {F.SYMBOL}, {F.DailyPnL.VALUATION_DATE})
+                UNIQUE({F.SYMBOL}, {F.DailyPnL.VALUATION_DATE})
             )
             """
         )

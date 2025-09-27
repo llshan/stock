@@ -1,0 +1,9 @@
+symbol, action, date, unit_cost, quantity, platform
+LULU, buy, 09/05/2025, 168, 120, ml
+PPC, buy, 09/10/2025, 42, 100, ml
+MRK, buy, 09/12/2025, 83.5, 120, ml
+SPY, buy, 09/17/2025, 656, 15, ml
+ALSN, buy, 09/23/2025, 87, 115, ml
+URTH, buy, 09/24/2025, 180, 60, ml
+SPY, buy, 09/24/2025, 662, 15, schwab
+URTH, buy, 09/24/2025, 180, 55, schwab

@@ -101,13 +101,23 @@ class DataService:
             # 策略选择
             if raw_last is None:
                 used = 'Stooq批量历史数据'
-                stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
+                try:
+                    stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
+                except DownloaderError as e:
+                    self.logger.warning(f"Stooq批量下载失败，尝试Finnhub: {e}")
+                    used = 'Finnhub批量下载(Stooq回退)'
+                    stock = self.finnhub_downloader.download_stock_data(symbol, actual_start)
             else:
                 days_since_last = (datetime.now() - datetime.strptime(raw_last, '%Y-%m-%d')).days
                 threshold_days = getattr(self.config.downloader, 'stock_incremental_threshold_days', 100)
                 if days_since_last <= threshold_days:
                     used = 'Finnhub增量更新'
-                    stock = self.finnhub_downloader.download_stock_data(symbol, actual_start)
+                    try:
+                        stock = self.finnhub_downloader.download_stock_data(symbol, actual_start)
+                    except DownloaderError as e:
+                        self.logger.warning(f"Finnhub增量更新失败，回退到Stooq批量下载: {e}")
+                        used = 'Stooq批量下载(Finnhub回退)'
+                        stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
                 else:
                     used = f'Stooq批量重下载(超过{threshold_days}天阈值)'
                     self.logger.info(

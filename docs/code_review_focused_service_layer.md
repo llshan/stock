@@ -21,9 +21,9 @@ def get_current_positions(self, ...):
 然而，`get_user_transactions` 方法是一个例外：
 ```python
 # TransactionService
-def get_user_transactions(self, user_id: str, ...):
+def get_user_transactions(self, ...):
     transactions_data = self.storage.get_transactions(
-        user_id, symbol, start_date, end_date
+        symbol, start_date, end_date
     )
     return [Transaction.from_dict(data) for data in transactions_data]
 ```
@@ -50,8 +50,8 @@ def get_user_transactions(self, user_id: str, ...):
 *   在 `lot_transaction_service.py` 中:
     ```python
     # class LotTransactionService:
-    def get_user_transactions(self, user_id: str, ...):
-        """获取用户交易记录的完整实现"""
+    def get_user_transactions(self, ...):
+        """获取交易记录的完整实现"""
         transactions_data = self.storage.get_transactions(...)
         return [Transaction.from_dict(data) for data in transactions_data]
     ```
@@ -59,10 +59,10 @@ def get_user_transactions(self, user_id: str, ...):
 *   在 `transaction_service.py` 中:
     ```python
     # class TransactionService:
-    def get_user_transactions(self, user_id: str, ...):
+    def get_user_transactions(self, ...):
         """纯粹的委托调用"""
         return self.lot_service.get_user_transactions(
-            user_id, symbol, start_date, end_date
+            symbol, start_date, end_date
         )
     ```
 

@@ -29,14 +29,13 @@ class LotPnLCalculator:
         self.config = config
         self.logger = logging.getLogger(__name__)
     
-    def calculate_daily_pnl(self, user_id: str, symbol: str, 
+    def calculate_daily_pnl(self, symbol: str, 
                            calculation_date: str, 
                            price_source: str = 'adj_close') -> Optional[DailyPnL]:
         """
         计算指定日期的盈亏
         
         Args:
-            user_id: 用户ID
             symbol: 股票代码
             calculation_date: 计算日期（YYYY-MM-DD格式）
             price_source: 价格来源（adj_close或close）
@@ -44,12 +43,12 @@ class LotPnLCalculator:
         Returns:
             DailyPnL: 当日盈亏记录，如果无持仓则返回None
         """
-        self.logger.debug(f"计算批次级别盈亏: {user_id} {symbol} {calculation_date}")
+        self.logger.debug(f"计算批次级别盈亏: {symbol} {calculation_date}")
         
         # 获取用户的所有活跃批次
-        lots_data = self.storage.get_position_lots(user_id, symbol, active_only=True)
+        lots_data = self.storage.get_position_lots(symbol, active_only=True)
         if not lots_data:
-            self.logger.debug(f"用户 {user_id} 在 {calculation_date} 没有 {symbol} 的活跃持仓")
+            self.logger.debug(f"在 {calculation_date} 没有 {symbol} 的活跃持仓")
             return None
         
         # 转换为PositionLot对象
@@ -79,13 +78,12 @@ class LotPnLCalculator:
         unrealized_pnl_pct = (unrealized_pnl / total_cost) if total_cost > 0 else 0.0
         
         # 获取当日已实现盈亏
-        realized_pnl = self.storage.get_daily_realized_pnl(user_id, symbol, calculation_date)
+        realized_pnl = self.storage.get_daily_realized_pnl(symbol, calculation_date)
         # 已实现盈亏百分比分母使用total_cost（成本基础），符合财务惯例
         realized_pnl_pct = (realized_pnl / total_cost) if total_cost > 0 else 0.0
         
         # 构造DailyPnL对象
         daily_pnl = DailyPnL(
-            user_id=user_id,
             symbol=symbol,
             valuation_date=calculation_date,
             quantity=total_quantity,
@@ -104,7 +102,7 @@ class LotPnLCalculator:
         
         # 检查是否是占位记录的补全
         if market_price > 0 and price_date:
-            self._check_placeholder_completion(user_id, symbol, calculation_date, daily_pnl)
+            self._check_placeholder_completion(symbol, calculation_date, daily_pnl)
         
         # 一致性校验（如果不是陈旧价格）
         if not is_stale:
@@ -164,7 +162,7 @@ class LotPnLCalculator:
         
         return total_cost / total_quantity if total_quantity > 0 else 0.0
     
-    def batch_calculate_daily_pnl(self, user_id: str, symbols: List[str],
+    def batch_calculate_daily_pnl(self, symbols: List[str],
                                  start_date: str, end_date: str,
                                  price_source: str = 'adj_close',
                                  only_trading_days: bool = False) -> Dict[str, List[DailyPnL]]:
@@ -172,7 +170,6 @@ class LotPnLCalculator:
         批量计算历史盈亏（优化版，减少N+1查询）
         
         Args:
-            user_id: 用户ID
             symbols: 股票代码列表
             start_date: 开始日期
             end_date: 结束日期
@@ -182,7 +179,7 @@ class LotPnLCalculator:
         Returns:
             Dict[str, List[DailyPnL]]: 按股票代码分组的每日盈亏记录
         """
-        self.logger.info(f"批量计算批次级别盈亏: {user_id}, {len(symbols)}只股票, "
+        self.logger.info(f"批量计算批次级别盈亏: {len(symbols)}只股票, "
                         f"{start_date} 到 {end_date}")
         
         results = {}
@@ -190,12 +187,12 @@ class LotPnLCalculator:
         # 优化：批量获取所有symbols的lots数据，避免N+1查询
         all_lots_by_symbol = {}
         for symbol in symbols:
-            lots_data = self.storage.get_position_lots(user_id, symbol, active_only=True)
+            lots_data = self.storage.get_position_lots(symbol, active_only=True)
             if lots_data:
                 all_lots_by_symbol[symbol] = self._convert_to_position_lots(lots_data)
         
-        # 生成日期范围（为指定symbols生成联合交易日）
-        dates = self._generate_date_range(start_date, end_date, only_trading_days, symbols)
+        # 生成日期范围
+        dates = self._generate_date_range(start_date, end_date, only_trading_days)
         
         # 优化：批量获取价格数据，减少数据库往返
         price_cache = self._batch_get_prices(symbols, dates, price_source)
@@ -206,7 +203,7 @@ class LotPnLCalculator:
             
             lots = all_lots_by_symbol.get(symbol, [])
             if not lots:
-                self.logger.debug(f"用户 {user_id} 没有 {symbol} 的活跃持仓")
+                self.logger.debug(f"没有 {symbol} 的活跃持仓")
                 continue
                 
             for date in dates:
@@ -223,17 +220,16 @@ class LotPnLCalculator:
                 # 计算加权平均成本和其他指标
                 total_quantity = sum(lot.remaining_quantity for lot in lots)
                 total_cost = sum(lot.total_cost for lot in lots)
-                avg_cost = total_cost / total_quantity if total_quantity > 0 else 0.0
+                avg_cost = total_cost / total_quantity if total_quantity > Decimal('0') else Decimal('0.0')
                 market_value = total_quantity * market_price
-                unrealized_pnl_pct = (unrealized_pnl / total_cost) if total_cost > 0 else 0.0
+                unrealized_pnl_pct = (unrealized_pnl / total_cost) if total_cost > Decimal('0') else Decimal('0.0')
                 
                 # 获取当日已实现盈亏
-                realized_pnl = self.storage.get_daily_realized_pnl(user_id, symbol, date)
-                realized_pnl_pct = (realized_pnl / total_cost) if total_cost > 0 else 0.0
+                realized_pnl = self.storage.get_daily_realized_pnl(symbol, date)
+                realized_pnl_pct = (realized_pnl / total_cost) if total_cost > Decimal('0') else Decimal('0.0')
                 
                 # 构造DailyPnL对象
                 daily_pnl = DailyPnL(
-                    user_id=user_id,
                     symbol=symbol,
                     valuation_date=date,
                     quantity=total_quantity,
@@ -261,7 +257,6 @@ class LotPnLCalculator:
     def save_daily_pnl(self, daily_pnl: DailyPnL) -> int:
         """保存每日盈亏记录到数据库"""
         pnl_data = {
-            'user_id': daily_pnl.user_id,
             'symbol': daily_pnl.symbol,
             'valuation_date': daily_pnl.valuation_date,
             'quantity': daily_pnl.quantity,
@@ -285,7 +280,6 @@ class LotPnLCalculator:
         for lot_data in lots_data:
             lot = PositionLot(
                 id=lot_data['id'],
-                user_id=lot_data['user_id'],
                 symbol=lot_data['symbol'],
                 transaction_id=lot_data['transaction_id'],
                 original_quantity=lot_data['original_quantity'],
@@ -450,13 +444,12 @@ class LotPnLCalculator:
             self.logger.error(f"❌ 一致性校验失败: {e}")
             # 不重新抛出异常，避免影响主流程
     
-    def _check_placeholder_completion(self, user_id: str, symbol: str, 
+    def _check_placeholder_completion(self, symbol: str, 
                                     calculation_date: str, daily_pnl: DailyPnL):
         """
         检查是否是对占位记录的补全
         
         Args:
-            user_id: 用户ID
             symbol: 股票代码
             calculation_date: 计算日期
             daily_pnl: 当前计算的PnL记录
@@ -464,7 +457,7 @@ class LotPnLCalculator:
         try:
             # 获取现有的daily_pnl记录
             existing_records = self.storage.get_daily_pnl(
-                user_id, symbol, calculation_date, calculation_date
+                symbol, calculation_date, calculation_date
             )
             
             if existing_records:

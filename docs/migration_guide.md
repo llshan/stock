@@ -93,9 +93,9 @@ python tools/post_migration_validation.py --db-path database/stock_data.db
 #### 4.2 功能测试
 ```bash
 # 测试基础CLI功能
-stock-trading positions --user-id test_user --db-path database/stock_data.db
-stock-trading lots --user-id test_user --db-path database/stock_data.db
-stock-trading sales --user-id test_user --db-path database/stock_data.db
+stock-trading positions --db-path database/stock_data.db
+stock-trading lots --db-path database/stock_data.db
+stock-trading sales --db-path database/stock_data.db
 ```
 
 #### 4.3 数据对比
@@ -133,8 +133,8 @@ alias st-tax='stock-trading tax-report'
 #### 2.1 每日盈亏计算
 ```bash
 # 添加到crontab
-# 每日凌晨2点计算所有用户的盈亏
-0 2 * * * /usr/bin/python /path/to/stock-trading daily --user-id all >> /var/log/daily_pnl.log 2>&1
+# 每日凌晨2点计算盈亏
+0 2 * * * /usr/bin/python /path/to/stock-trading daily >> /var/log/daily_pnl.log 2>&1
 ```
 
 #### 2.2 数据一致性检查
@@ -179,7 +179,7 @@ python tools/migrate_to_lot_tracking.py --db-path database/stock_data.db --disab
 1. 检查交易记录的完整性
 2. 使用手动分配模式：
 ```bash
-python tools/manual_allocation.py --db-path database/stock_data.db --user-id user123 --symbol AAPL
+python tools/manual_allocation.py --db-path database/stock_data.db --symbol AAPL
 ```
 
 ### Q3: 迁移后持仓数量不匹配
@@ -188,7 +188,7 @@ python tools/manual_allocation.py --db-path database/stock_data.db --user-id use
 2. 检查是否有遗漏的交易记录
 3. 使用重算工具：
 ```bash
-python tools/recalculate_positions.py --db-path database/stock_data.db --user-id user123
+python tools/recalculate_positions.py --db-path database/stock_data.db
 ```
 
 ### Q4: 性能下降明显
@@ -205,7 +205,7 @@ python tools/optimize_indexes.py --db-path database/stock_data.db
 ### 1. 数据库优化
 ```sql
 -- 分析查询计划
-EXPLAIN QUERY PLAN SELECT * FROM position_lots WHERE user_id = 'user123' AND symbol = 'AAPL';
+EXPLAIN QUERY PLAN SELECT * FROM position_lots WHERE symbol = 'AAPL';
 
 -- 更新统计信息
 ANALYZE;

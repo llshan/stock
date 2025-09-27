@@ -26,22 +26,21 @@ def seed_prices(storage: SQLiteStorage, symbol: str, dates_prices: list[tuple[st
 def test_realized_pnl_updates_daily_record():
     storage = SQLiteStorage(":memory:")
     try:
-        user_id = "u1"
         symbol = "AAPL"
         # 价格：买入日150，次日160
         seed_prices(storage, symbol, [("2024-01-10", 150.0), ("2024-01-11", 160.0)])
 
         svc = TransactionService(storage)
-        svc.record_buy_transaction(user_id, symbol, quantity=10, price=150.0, transaction_date="2024-01-10")
+        svc.record_buy_transaction(symbol, quantity=10, price=150.0, transaction_date="2024-01-10")
 
         # 先计算卖出当日的日度盈亏记录（未实现部分）
         calc = PnLCalculator(storage=storage)
-        calc.calculate_daily_pnl(user_id, symbol, "2024-01-11")
+        calc.calculate_daily_pnl(symbol, "2024-01-11")
 
         # 卖出5股@160，预期已实现盈亏 = (160-150)*5 = 50
-        svc.record_sell_transaction(user_id, symbol, quantity=5, price=160.0, transaction_date="2024-01-11")
+        svc.record_sell_transaction(symbol, quantity=5, price=160.0, transaction_date="2024-01-11")
 
-        records = storage.get_daily_pnl(user_id, symbol, "2024-01-11", "2024-01-11")
+        records = storage.get_daily_pnl(symbol, "2024-01-11", "2024-01-11")
         assert records, "expected a daily_pnl record for the sell date"
         rec = records[0]
         assert math.isclose(float(rec.get("realized_pnl", 0.0)), 50.0, rel_tol=1e-6)
@@ -55,14 +54,13 @@ def test_realized_pnl_updates_daily_record():
 def test_full_sell_removes_position():
     storage = SQLiteStorage(":memory:")
     try:
-        user_id = "u2"
         symbol = "MSFT"
         seed_prices(storage, symbol, [("2024-01-10", 100.0), ("2024-01-11", 101.0)])
         svc = TransactionService(storage)
-        svc.record_buy_transaction(user_id, symbol, quantity=10, price=100.0, transaction_date="2024-01-10")
+        svc.record_buy_transaction(symbol, quantity=10, price=100.0, transaction_date="2024-01-10")
         # 全部卖出
-        svc.record_sell_transaction(user_id, symbol, quantity=10, price=101.0, transaction_date="2024-01-11")
-        positions = svc.get_current_positions(user_id)
+        svc.record_sell_transaction(symbol, quantity=10, price=101.0, transaction_date="2024-01-11")
+        positions = svc.get_current_positions()
         assert all(p.symbol != symbol for p in positions), "position should be removed after full sell"
     finally:
         storage.close()

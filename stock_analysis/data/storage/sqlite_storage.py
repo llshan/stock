@@ -77,6 +77,10 @@ class SQLiteStorage(BaseStorage):
             # 确保批次追踪表存在（幂等操作）
             self.schema_manager.ensure_lot_tracking_tables()
 
+            # 创建交易和批次追踪相关索引
+            for index_sql in self.config.get_trading_and_lot_indexes():
+                self.cursor.execute(index_sql)
+
             self.logger.info(f"📁 SQLite 数据库连接成功: {self.db_path}")
 
         except Exception as e:
@@ -489,7 +493,7 @@ class SQLiteStorage(BaseStorage):
         # 如果提供了external_id，先检查是否已存在（幂等性检查）
         if external_id:
             existing_id = self._get_transaction_by_external_id(
-                transaction_data['user_id'], external_id
+                external_id
             )
             if existing_id:
                 self.logger.debug(f"交易 {external_id} 已存在，返回现有ID: {existing_id}")
@@ -497,35 +501,28 @@ class SQLiteStorage(BaseStorage):
         
         # 构建字段和值
         if external_id:
-            fields = f"{F.Transactions.USER_ID}, {F.Transactions.EXTERNAL_ID}, {F.SYMBOL}, " \
-                    f"{F.Transactions.TRANSACTION_TYPE}, {F.Transactions.QUANTITY}, " \
-                    f"{F.Transactions.PRICE}, {F.Transactions.COMMISSION}, " \
-                    f"{F.Transactions.TRANSACTION_DATE}, {F.Transactions.NOTES}, {F.UPDATED_AT}"
-            placeholders = "?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
+            fields = f"{F.Transactions.EXTERNAL_ID}, {F.SYMBOL}, "                     f"{F.Transactions.TRANSACTION_TYPE}, {F.Transactions.QUANTITY}, "                     f"{F.Transactions.PRICE}, "                     f"{F.Transactions.TRANSACTION_DATE}, {F.Transactions.PLATFORM}, {F.Transactions.NOTES}, {F.UPDATED_AT}"
+            placeholders = "?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
             values = (
-                transaction_data['user_id'],
                 external_id,
                 transaction_data['symbol'],
                 transaction_data['transaction_type'],
-                transaction_data['quantity'],
-                transaction_data['price'],
-                transaction_data.get('commission', 0.0),
+                float(transaction_data['quantity']),
+                float(transaction_data['price']),
                 transaction_data['transaction_date'],
+                transaction_data.get('platform'),
                 transaction_data.get('notes'),
             )
         else:
-            fields = f"{F.Transactions.USER_ID}, {F.SYMBOL}, {F.Transactions.TRANSACTION_TYPE}, " \
-                    f"{F.Transactions.QUANTITY}, {F.Transactions.PRICE}, {F.Transactions.COMMISSION}, " \
-                    f"{F.Transactions.TRANSACTION_DATE}, {F.Transactions.NOTES}, {F.UPDATED_AT}"
-            placeholders = "?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
+            fields = f"{F.SYMBOL}, {F.Transactions.TRANSACTION_TYPE}, "                     f"{F.Transactions.QUANTITY}, {F.Transactions.PRICE}, "                     f"{F.Transactions.TRANSACTION_DATE}, {F.Transactions.PLATFORM}, {F.Transactions.NOTES}, {F.UPDATED_AT}"
+            placeholders = "?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
             values = (
-                transaction_data['user_id'],
                 transaction_data['symbol'],
                 transaction_data['transaction_type'],
-                transaction_data['quantity'],
-                transaction_data['price'],
-                transaction_data.get('commission', 0.0),
+                float(transaction_data['quantity']),
+                float(transaction_data['price']),
                 transaction_data['transaction_date'],
+                transaction_data.get('platform'),
                 transaction_data.get('notes'),
             )
         
@@ -539,37 +536,38 @@ class SQLiteStorage(BaseStorage):
             if "UNIQUE constraint failed" in str(e) and external_id:
                 # 唯一约束冲突，重新查询返回已存在的ID
                 existing_id = self._get_transaction_by_external_id(
-                    transaction_data['user_id'], external_id
+                    external_id
                 )
                 if existing_id:
                     self.logger.debug(f"交易 {external_id} 并发插入，返回现有ID: {existing_id}")
                     return existing_id
             raise
     
-    def _get_transaction_by_external_id(self, user_id: str, external_id: str) -> Optional[int]:
+    def _get_transaction_by_external_id(self, external_id: str) -> Optional[int]:
         """根据external_id查询已存在的交易记录ID"""
         T = self.config.Tables.TRANSACTIONS
         F = self.config.Fields
         
         sql = f"""
             SELECT {F.Transactions.ID} FROM {T} 
-            WHERE {F.Transactions.USER_ID} = ? AND {F.Transactions.EXTERNAL_ID} = ?
+            WHERE {F.Transactions.EXTERNAL_ID} = ?
         """
         
-        self.cursor.execute(sql, (user_id, external_id))
+        self.cursor.execute(sql, (external_id,))
         row = self.cursor.fetchone()
         return row[0] if row else None
 
-    def get_transactions(self, user_id: str, symbol: str = None, 
-                        start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
+    def get_transactions(self, symbol: str = None, 
+                        start_date: str = None, end_date: str = None, 
+                        transaction_type: str = None) -> List[Dict[str, Any]]:
         """获取交易记录"""
         self._check_connection("get_transactions")
         
         T = self.config.Tables.TRANSACTIONS
         F = self.config.Fields
         
-        conditions = [f"{F.Transactions.USER_ID} = ?"]
-        params = [user_id]
+        conditions = []
+        params = []
         
         if symbol:
             conditions.append(f"{F.SYMBOL} = ?")
@@ -582,8 +580,12 @@ class SQLiteStorage(BaseStorage):
         if end_date:
             conditions.append(f"{F.Transactions.TRANSACTION_DATE} <= ?")
             params.append(end_date)
+
+        if transaction_type:
+            conditions.append(f"{F.Transactions.TRANSACTION_TYPE} = ?")
+            params.append(transaction_type)
         
-        where_clause = " AND ".join(conditions)
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
         sql = f"SELECT * FROM {T} WHERE {where_clause} ORDER BY {F.Transactions.TRANSACTION_DATE}, {F.Transactions.ID}"
         
         self.cursor.execute(sql, params)
@@ -599,15 +601,15 @@ class SQLiteStorage(BaseStorage):
         T = self.config.Tables.POSITIONS
         F = self.config.Fields
         
-        fields = f"{F.Positions.USER_ID}, {F.SYMBOL}, {F.Positions.QUANTITY}, " \
+        fields = f"{F.SYMBOL}, {F.Positions.QUANTITY}, " \
                 f"{F.Positions.AVG_COST}, {F.Positions.TOTAL_COST}, {F.Positions.FIRST_BUY_DATE}, " \
                 f"{F.Positions.LAST_TRANSACTION_DATE}, {F.Positions.IS_ACTIVE}, {F.UPDATED_AT}"
-        placeholders = "?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
+        placeholders = "?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
         
-        # 使用 INSERT ... ON CONFLICT(user_id, symbol) DO UPDATE 以避免 REPLACE 的副作用
+        # 使用 INSERT ... ON CONFLICT(symbol) DO UPDATE 以避免 REPLACE 的副作用
         sql = (
             f"INSERT INTO {T} ({fields}) VALUES ({placeholders}) "
-            f"ON CONFLICT({F.Positions.USER_ID}, {F.SYMBOL}) DO UPDATE SET "
+            f"ON CONFLICT({F.SYMBOL}) DO UPDATE SET "
             f"{F.Positions.QUANTITY}=excluded.{F.Positions.QUANTITY}, "
             f"{F.Positions.AVG_COST}=excluded.{F.Positions.AVG_COST}, "
             f"{F.Positions.TOTAL_COST}=excluded.{F.Positions.TOTAL_COST}, "
@@ -620,7 +622,6 @@ class SQLiteStorage(BaseStorage):
         self.cursor.execute(
             sql,
             (
-                position_data['user_id'],
                 position_data['symbol'],
                 position_data['quantity'],
                 position_data['avg_cost'],
@@ -636,20 +637,20 @@ class SQLiteStorage(BaseStorage):
 
     
 
-    def get_positions(self, user_id: str, active_only: bool = True) -> List[Dict[str, Any]]:
-        """获取持仓记录"""
+    def get_positions(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """获取所有持仓记录"""
         self._check_connection("get_positions")
         
         T = self.config.Tables.POSITIONS
         F = self.config.Fields
         
-        conditions = [f"{F.Positions.USER_ID} = ?"]
-        params = [user_id]
+        conditions = []
+        params = []
         
         if active_only:
             conditions.append(f"{F.Positions.IS_ACTIVE} = 1")
         
-        where_clause = " AND ".join(conditions)
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
         sql = f"SELECT * FROM {T} WHERE {where_clause} ORDER BY {F.SYMBOL}"
         
         self.cursor.execute(sql, params)
@@ -658,16 +659,16 @@ class SQLiteStorage(BaseStorage):
         columns = [description[0] for description in self.cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 
-    def get_position(self, user_id: str, symbol: str) -> Optional[Dict[str, Any]]:
+    def get_position(self, symbol: str) -> Optional[Dict[str, Any]]:
         """获取特定股票的持仓记录"""
         self._check_connection("get_position")
         
         T = self.config.Tables.POSITIONS
         F = self.config.Fields
         
-        sql = f"SELECT * FROM {T} WHERE {F.Positions.USER_ID} = ? AND {F.SYMBOL} = ?"
+        sql = f"SELECT * FROM {T} WHERE {F.SYMBOL} = ?"
         
-        self.cursor.execute(sql, (user_id, symbol))
+        self.cursor.execute(sql, (symbol,))
         row = self.cursor.fetchone()
         
         if row:
@@ -686,13 +687,13 @@ class SQLiteStorage(BaseStorage):
         # 使用ON CONFLICT进行精确更新，避免REPLACE的副作用
         sql = f"""
         INSERT INTO {T} (
-            {F.DailyPnL.USER_ID}, {F.SYMBOL}, {F.DailyPnL.VALUATION_DATE},
+            {F.SYMBOL}, {F.DailyPnL.VALUATION_DATE},
             {F.DailyPnL.QUANTITY}, {F.DailyPnL.AVG_COST}, {F.DailyPnL.MARKET_PRICE},
             {F.DailyPnL.MARKET_VALUE}, {F.DailyPnL.UNREALIZED_PNL}, {F.DailyPnL.UNREALIZED_PNL_PCT},
             {F.DailyPnL.REALIZED_PNL}, {F.DailyPnL.REALIZED_PNL_PCT}, {F.DailyPnL.TOTAL_COST},
             {F.DailyPnL.PRICE_DATE}, {F.DailyPnL.IS_STALE_PRICE}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT({F.DailyPnL.USER_ID}, {F.SYMBOL}, {F.DailyPnL.VALUATION_DATE}) 
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT({F.SYMBOL}, {F.DailyPnL.VALUATION_DATE}) 
         DO UPDATE SET
             {F.DailyPnL.QUANTITY} = excluded.{F.DailyPnL.QUANTITY},
             {F.DailyPnL.AVG_COST} = excluded.{F.DailyPnL.AVG_COST},
@@ -708,18 +709,17 @@ class SQLiteStorage(BaseStorage):
         """
         
         self.cursor.execute(sql, (
-            pnl_data['user_id'],
             pnl_data['symbol'],
             pnl_data['valuation_date'],
-            pnl_data['quantity'],
-            pnl_data['avg_cost'],
-            pnl_data['market_price'],
-            pnl_data['market_value'],
-            pnl_data['unrealized_pnl'],
-            pnl_data['unrealized_pnl_pct'],
-            pnl_data.get('realized_pnl', 0.0),
-            pnl_data.get('realized_pnl_pct', 0.0),
-            pnl_data['total_cost'],
+            float(pnl_data['quantity']),
+            float(pnl_data['avg_cost']),
+            float(pnl_data['market_price']) if pnl_data['market_price'] is not None else None,
+            float(pnl_data['market_value']) if pnl_data['market_value'] is not None else None,
+            float(pnl_data['unrealized_pnl']) if pnl_data['unrealized_pnl'] is not None else None,
+            float(pnl_data['unrealized_pnl_pct']) if pnl_data['unrealized_pnl_pct'] is not None else None,
+            float(pnl_data.get('realized_pnl', 0.0)),
+            float(pnl_data.get('realized_pnl_pct', 0.0)),
+            float(pnl_data['total_cost']) if pnl_data['total_cost'] is not None else None,
             pnl_data.get('price_date'),
             pnl_data.get('is_stale_price', 0),
         ))
@@ -727,7 +727,7 @@ class SQLiteStorage(BaseStorage):
         self._maybe_commit()
         return self.cursor.lastrowid
 
-    def get_daily_pnl(self, user_id: str, symbol: str = None, 
+    def get_daily_pnl(self, symbol: str = None, 
                       start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """获取每日盈亏记录"""
         self._check_connection("get_daily_pnl")
@@ -735,8 +735,8 @@ class SQLiteStorage(BaseStorage):
         T = self.config.Tables.DAILY_PNL
         F = self.config.Fields
         
-        conditions = [f"{F.DailyPnL.USER_ID} = ?"]
-        params = [user_id]
+        conditions = []
+        params = []
         
         if symbol:
             conditions.append(f"{F.SYMBOL} = ?")
@@ -750,7 +750,7 @@ class SQLiteStorage(BaseStorage):
             conditions.append(f"{F.DailyPnL.VALUATION_DATE} <= ?")
             params.append(end_date)
         
-        where_clause = " AND ".join(conditions)
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
         sql = f"SELECT * FROM {T} WHERE {where_clause} ORDER BY {F.DailyPnL.VALUATION_DATE} DESC, {F.SYMBOL}"
         
         self.cursor.execute(sql, params)
@@ -759,16 +759,16 @@ class SQLiteStorage(BaseStorage):
         columns = [description[0] for description in self.cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 
-    def delete_position(self, user_id: str, symbol: str) -> bool:
+    def delete_position(self, symbol: str) -> bool:
         """删除持仓记录"""
         self._check_connection("delete_position")
         
         T = self.config.Tables.POSITIONS
         F = self.config.Fields
         
-        sql = f"DELETE FROM {T} WHERE {F.Positions.USER_ID} = ? AND {F.SYMBOL} = ?"
+        sql = f"DELETE FROM {T} WHERE {F.SYMBOL} = ?"
         
-        self.cursor.execute(sql, (user_id, symbol))
+        self.cursor.execute(sql, (symbol,))
         self._maybe_commit()
         
         return self.cursor.rowcount > 0
@@ -833,24 +833,23 @@ class SQLiteStorage(BaseStorage):
         T = self.config.Tables.POSITION_LOTS
         F = self.config.Fields
         
-        fields = f"{F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.TRANSACTION_ID}, " \
+        fields = f"{F.SYMBOL}, {F.PositionLots.TRANSACTION_ID}, " \
                 f"{F.PositionLots.ORIGINAL_QUANTITY}, {F.PositionLots.REMAINING_QUANTITY}, " \
                 f"{F.PositionLots.COST_BASIS}, {F.PositionLots.PURCHASE_DATE}, " \
                 f"{F.PositionLots.IS_CLOSED}, {F.CREATED_AT}, {F.UPDATED_AT}"
         
-        placeholders = "?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+        placeholders = "?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
         
         sql = f"INSERT INTO {T} ({fields}) VALUES ({placeholders})"
         
         self.cursor.execute(
             sql,
             (
-                lot_data['user_id'],
                 lot_data['symbol'],
                 lot_data['transaction_id'],
-                lot_data['original_quantity'],
-                lot_data['remaining_quantity'],
-                lot_data['cost_basis'],
+                float(lot_data['original_quantity']),
+                float(lot_data['remaining_quantity']),
+                float(lot_data['cost_basis']),
                 lot_data['purchase_date'],
                 lot_data.get('is_closed', False),
             ),
@@ -871,25 +870,25 @@ class SQLiteStorage(BaseStorage):
             sql = f"UPDATE {T} SET {F.PositionLots.REMAINING_QUANTITY} = ?, " \
                   f"{F.PositionLots.IS_CLOSED} = ?, {F.UPDATED_AT} = CURRENT_TIMESTAMP " \
                   f"WHERE {F.PositionLots.ID} = ?"
-            params = (remaining_quantity, is_closed, lot_id)
+            params = (float(remaining_quantity), is_closed, lot_id)
         else:
             sql = f"UPDATE {T} SET {F.PositionLots.REMAINING_QUANTITY} = ?, " \
                   f"{F.UPDATED_AT} = CURRENT_TIMESTAMP WHERE {F.PositionLots.ID} = ?"
-            params = (remaining_quantity, lot_id)
+            params = (float(remaining_quantity), lot_id)
         
         self.cursor.execute(sql, params)
         self._maybe_commit()
 
-    def get_position_lots(self, user_id: str, symbol: str = None, 
+    def get_position_lots(self, symbol: str = None, 
                          active_only: bool = True) -> List[Dict[str, Any]]:
-        """获取用户的持仓批次"""
+        """获取持仓批次"""
         self._check_connection("get_position_lots")
         
         T = self.config.Tables.POSITION_LOTS
         F = self.config.Fields
         
-        conditions = [f"{F.PositionLots.USER_ID} = ?"]
-        params = [user_id]
+        conditions = []
+        params = []
         
         if symbol:
             conditions.append(f"{F.SYMBOL} = ?")
@@ -932,12 +931,9 @@ class SQLiteStorage(BaseStorage):
         T = self.config.Tables.SALE_ALLOCATIONS
         F = self.config.Fields
         
-        fields = f"{F.SaleAllocations.SALE_TRANSACTION_ID}, {F.SaleAllocations.LOT_ID}, " \
-                f"{F.SaleAllocations.QUANTITY_SOLD}, {F.SaleAllocations.COST_BASIS}, " \
-                f"{F.SaleAllocations.SALE_PRICE}, {F.SaleAllocations.REALIZED_PNL}, " \
-                f"{F.SaleAllocations.COMMISSION_ALLOCATED}, {F.CREATED_AT}"
+        fields = f"{F.SaleAllocations.SALE_TRANSACTION_ID}, {F.SaleAllocations.LOT_ID}, "                 f"{F.SaleAllocations.QUANTITY_SOLD}, {F.SaleAllocations.COST_BASIS}, "                 f"{F.SaleAllocations.SALE_PRICE}, {F.SaleAllocations.REALIZED_PNL}, {F.CREATED_AT}"
         
-        placeholders = "?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
+        placeholders = "?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP"
         
         sql = f"INSERT INTO {T} ({fields}) VALUES ({placeholders})"
         
@@ -946,18 +942,17 @@ class SQLiteStorage(BaseStorage):
             (
                 allocation_data['sale_transaction_id'],
                 allocation_data['lot_id'],
-                allocation_data['quantity_sold'],
-                allocation_data['cost_basis'],
-                allocation_data['sale_price'],
-                allocation_data['realized_pnl'],
-                allocation_data.get('commission_allocated', 0.0),
+                float(allocation_data['quantity_sold']),
+                float(allocation_data['cost_basis']),
+                float(allocation_data['sale_price']),
+                float(allocation_data['realized_pnl']),
             ),
         )
         
         self._maybe_commit()
         return self.cursor.lastrowid
 
-    def get_sale_allocations(self, user_id: str = None, symbol: str = None,
+    def get_sale_allocations(self, symbol: str = None,
                            sale_transaction_id: int = None) -> List[Dict[str, Any]]:
         """获取卖出分配记录"""
         self._check_connection("get_sale_allocations")
@@ -969,7 +964,7 @@ class SQLiteStorage(BaseStorage):
         
         # 联接查询获取完整信息
         sql = f"""
-            SELECT sa.*, pl.{F.PositionLots.USER_ID}, pl.{F.SYMBOL}, 
+            SELECT sa.*, pl.{F.SYMBOL}, 
                    pl.{F.PositionLots.PURCHASE_DATE}, t.{F.Transactions.TRANSACTION_DATE}
             FROM {T_SALE} sa
             JOIN {T_LOT} pl ON sa.{F.SaleAllocations.LOT_ID} = pl.{F.PositionLots.ID}
@@ -978,10 +973,6 @@ class SQLiteStorage(BaseStorage):
         
         conditions = []
         params = []
-        
-        if user_id:
-            conditions.append(f"pl.{F.PositionLots.USER_ID} = ?")
-            params.append(user_id)
         
         if symbol:
             conditions.append(f"pl.{F.SYMBOL} = ?")
@@ -1002,7 +993,7 @@ class SQLiteStorage(BaseStorage):
         columns = [description[0] for description in self.cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 
-    def get_daily_realized_pnl(self, user_id: str, symbol: str, date: str) -> float:
+    def get_daily_realized_pnl(self, symbol: str, date: str) -> float:
         """获取指定日期的已实现盈亏总额"""
         self._check_connection("get_daily_realized_pnl")
         
@@ -1012,21 +1003,21 @@ class SQLiteStorage(BaseStorage):
         F = self.config.Fields
         
         sql = f"""
-            SELECT SUM(sa.{F.SaleAllocations.REALIZED_PNL} - sa.{F.SaleAllocations.COMMISSION_ALLOCATED})
+            SELECT SUM(sa.{F.SaleAllocations.REALIZED_PNL})
             FROM {T_SALE} sa
             JOIN {T_LOT} pl ON sa.{F.SaleAllocations.LOT_ID} = pl.{F.PositionLots.ID}
             JOIN {T_TXN} t ON sa.{F.SaleAllocations.SALE_TRANSACTION_ID} = t.{F.Transactions.ID}
-            WHERE pl.{F.PositionLots.USER_ID} = ? AND pl.{F.SYMBOL} = ? 
+            WHERE pl.{F.SYMBOL} = ? 
             AND t.{F.Transactions.TRANSACTION_DATE} = ?
         """
         
-        self.cursor.execute(sql, (user_id, symbol, date))
+        self.cursor.execute(sql, (symbol, date))
         result = self.cursor.fetchone()
         
         return result[0] if result and result[0] is not None else 0.0
 
-    def get_active_symbols_for_user(self, user_id: str) -> List[str]:
-        """获取用户所有活跃持仓的股票代码列表"""
+    def get_active_symbols_for_user(self) -> List[str]:
+        """获取所有活跃持仓的股票代码列表"""
         self._check_connection("get_active_symbols_for_user")
         
         T = self.config.Tables.POSITION_LOTS
@@ -1035,49 +1026,46 @@ class SQLiteStorage(BaseStorage):
         sql = f"""
             SELECT DISTINCT {F.SYMBOL}
             FROM {T}
-            WHERE {F.PositionLots.USER_ID} = ? AND {F.PositionLots.IS_CLOSED} = 0
+            WHERE {F.PositionLots.IS_CLOSED} = 0
         """
         
-        self.cursor.execute(sql, (user_id,))
+        self.cursor.execute(sql)
         rows = self.cursor.fetchall()
         
         return [row[0] for row in rows]
 
-    def get_position_lots_batch(self, user_ids: List[str], symbols: List[str], 
+    def get_position_lots_batch(self, symbols: List[str], 
                                active_only: bool = True, page_size: int = 1000, 
-                               page_offset: int = 0) -> Dict[tuple, List[Dict[str, Any]]]:
+                               page_offset: int = 0) -> Dict[str, List[Dict[str, Any]]]:
         """
-        批量获取多个用户/股票的批次数据
+        批量获取多个股票的批次数据
         
         Args:
-            user_ids: 用户ID列表
             symbols: 股票代码列表
             active_only: 是否只返回活跃批次
             page_size: 每页大小
             page_offset: 页偏移量
             
         Returns:
-            Dict[tuple, List[Dict]]: {(user_id, symbol): [lot_data...]}
+            Dict[str, List[Dict]]: {symbol: [lot_data...]}
         """
         self._check_connection("get_position_lots_batch")
         
-        if not user_ids or not symbols:
+        if not symbols:
             return {}
         
         T = self.config.Tables.POSITION_LOTS
         F = self.config.Fields
         
         # 构建IN子句的占位符
-        user_placeholders = ','.join(['?' for _ in user_ids])
         symbol_placeholders = ','.join(['?' for _ in symbols])
         
         # 构建SQL查询
         conditions = [
-            f"{F.PositionLots.USER_ID} IN ({user_placeholders})",
             f"{F.SYMBOL} IN ({symbol_placeholders})"
         ]
         
-        params = user_ids + symbols
+        params = symbols
         
         if active_only:
             conditions.append(f"{F.PositionLots.IS_CLOSED} = 0")
@@ -1086,7 +1074,7 @@ class SQLiteStorage(BaseStorage):
         sql = f"""
             SELECT * FROM {T} 
             WHERE {where_clause}
-            ORDER BY {F.PositionLots.USER_ID}, {F.SYMBOL}, {F.PositionLots.PURCHASE_DATE}
+            ORDER BY {F.SYMBOL}, {F.PositionLots.PURCHASE_DATE}
             LIMIT ? OFFSET ?
         """
         
@@ -1097,17 +1085,17 @@ class SQLiteStorage(BaseStorage):
         columns = [description[0] for description in self.cursor.description]
         lots_data = [dict(zip(columns, row)) for row in rows]
         
-        # 按(user_id, symbol)分组
+        # 按symbol分组
         result = {}
         for lot_data in lots_data:
-            key = (lot_data[F.PositionLots.USER_ID], lot_data[F.SYMBOL])
+            key = lot_data[F.SYMBOL]
             if key not in result:
                 result[key] = []
             result[key].append(lot_data)
         
         return result
 
-    def get_position_lots_paginated(self, user_id: str, symbol: str = None, 
+    def get_position_lots_paginated(self, symbol: str = None, 
                                    active_only: bool = True, page_size: int = 100, 
                                    page_offset: int = 0) -> tuple:
         """
@@ -1122,8 +1110,8 @@ class SQLiteStorage(BaseStorage):
         F = self.config.Fields
         
         # 构建条件
-        conditions = [f"{F.PositionLots.USER_ID} = ?"]
-        params = [user_id]
+        conditions = []
+        params = []
         
         if symbol:
             conditions.append(f"{F.SYMBOL} = ?")
@@ -1190,3 +1178,7 @@ class SQLiteStorage(BaseStorage):
         # 注意：在生产环境中，这里应该实际移动数据到归档表
         # 目前我们只是返回可归档的数量
         return count
+
+    def get_active_symbols(self) -> List[str]:
+        """获取所有活跃持仓的股票代码列表（别名方法）"""
+        return self.get_active_symbols_for_user()

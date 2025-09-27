@@ -66,7 +66,6 @@ TRADING_CONFIG = {
     'currency_precision': 2,
     
     # 安全设置
-    'max_user_id_length': 50,
     'enable_external_id_validation': True,
     
     # 日志设置
@@ -307,7 +306,7 @@ User=app_user
 Group=app_group
 WorkingDirectory=/app/stock_trading
 Environment=PYTHONPATH=/app/stock_trading
-ExecStart=/usr/bin/python -m stock_analysis.cli.trading_manager daily --user-id all
+ExecStart=/usr/bin/python -m stock_analysis.cli.trading_manager daily
 Restart=always
 RestartSec=10
 
@@ -326,7 +325,7 @@ WantedBy=multi-user.target
 ```bash
 # /etc/cron.d/stock-trading
 # 每日凌晨2点计算盈亏
-0 2 * * * app_user /usr/bin/python /app/stock_trading/stock_analysis/cli/trading_manager.py daily --user-id all >> /var/log/stock_trading/daily.log 2>&1
+0 2 * * * app_user /usr/bin/python /app/stock_trading/stock_analysis/cli/trading_manager.py daily >> /var/log/stock_trading/daily.log 2>&1
 
 # 每周日凌晨3点进行数据一致性检查
 0 3 * * 0 app_user /usr/bin/python /app/stock_trading/tools/consistency_check.py >> /var/log/stock_trading/consistency.log 2>&1
@@ -351,19 +350,19 @@ python -c "from stock_analysis.data.storage import create_storage; storage = cre
 
 # 测试基础交易功能
 echo "测试买入交易..."
-stock-trading buy --user-id test_deployment --symbol TEST -q 10 -p 100 -d 2024-01-01
+stock-trading buy --symbol TEST -q 10 -p 100 -d 2024-01-01
 
 # 测试批次查询
 echo "测试批次查询..."
-stock-trading lots --user-id test_deployment
+stock-trading lots
 
 # 测试卖出交易
 echo "测试卖出交易..."
-stock-trading sell --user-id test_deployment --symbol TEST -q 5 -p 110 -d 2024-01-02
+stock-trading sell --symbol TEST -q 5 -p 110 -d 2024-01-02
 
 # 测试税务报告
 echo "测试税务报告..."
-stock-trading tax-report --user-id test_deployment --start-date 2024-01-01 --end-date 2024-12-31
+stock-trading tax-report --start-date 2024-01-01 --end-date 2024-12-31
 
 echo "部署验证测试完成！"
 ```
@@ -380,9 +379,9 @@ echo "开始性能测试..."
 python tests/test_trading_performance.py
 
 # 查询性能测试
-time stock-trading lots --user-id test_user
-time stock-trading sales --user-id test_user
-time stock-trading positions --user-id test_user
+time stock-trading lots
+time stock-trading sales
+time stock-trading positions
 
 echo "性能测试完成！"
 ```
@@ -432,7 +431,7 @@ echo "性能测试完成！"
 3. **性能问题**
    ```bash
    # 检查索引使用情况
-   sqlite3 database/stock_data.db "EXPLAIN QUERY PLAN SELECT * FROM position_lots WHERE user_id='test';"
+   sqlite3 database/stock_data.db "EXPLAIN QUERY PLAN SELECT * FROM position_lots WHERE symbol='AAPL';"
    # 更新统计信息
    sqlite3 database/stock_data.db "ANALYZE;"
    ```

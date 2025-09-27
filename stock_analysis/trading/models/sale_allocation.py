@@ -20,13 +20,13 @@ class SaleAllocation:
     - 记录精确的数量、成本和收益
     """
     
-    id: Optional[int] = None
     sale_transaction_id: int           # 卖出交易ID
     lot_id: int                       # 匹配的买入批次ID
     quantity_sold: Decimal            # 从该批次卖出的数量
     cost_basis: Decimal               # 该批次的成本基础（每股）
     sale_price: Decimal               # 卖出价格（每股）
     realized_pnl: Decimal             # 该笔匹配的已实现盈亏
+    id: Optional[int] = None
     created_at: Optional[datetime] = None
     
     @property

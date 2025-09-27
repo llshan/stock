@@ -9,3 +9,4 @@ seaborn==0.12.2
 google-cloud-storage>=2.10.0
 functions-framework>=3.4.0
 kaleido>=0.2.1
+openai>=1.0.0

@@ -86,7 +86,6 @@ tools/
 @dataclass
 class Transaction:
     id: Optional[int] = None
-    user_id: str                    # 用户ID
     symbol: str                     # 股票代码
     transaction_type: str           # 交易类型: 'BUY', 'SELL'
     quantity: float                 # 交易数量（支持小数股）
@@ -103,7 +102,6 @@ class Transaction:
 @dataclass  
 class PositionLot:
     id: Optional[int] = None
-    user_id: str                    # 用户ID
     symbol: str                     # 股票代码
     transaction_id: int             # 关联的买入交易ID
     original_quantity: float        # 原始买入数量
@@ -124,8 +122,7 @@ class PositionLot:
 ```python
 @dataclass
 class PositionSummary:
-    """用户某股票的持仓汇总（从所有批次计算得出）"""
-    user_id: str
+    """某股票的持仓汇总（从所有批次计算得出）"""
     symbol: str
     total_quantity: float           # 总持仓数量
     total_cost: float              # 总成本（所有批次成本之和）
@@ -160,7 +157,6 @@ class SaleAllocation:
 @dataclass
 class DailyPnL:
     id: Optional[int] = None
-    user_id: str                    # 用户ID
     symbol: str                     # 股票代码
     valuation_date: str             # 估值日期（YYYY-MM-DD, TEXT）
     quantity: float                 # 持仓数量
@@ -182,23 +178,23 @@ class DailyPnL:
 #### 4.1.1 主要方法
 ```python
 class TransactionService:
-    def record_buy_transaction(self, user_id: str, symbol: str, 
+    def record_buy_transaction(self, symbol: str, 
                              quantity: float, price: float, 
                              transaction_date: str) -> Transaction
     
-    def record_sell_transaction(self, user_id: str, symbol: str,
+    def record_sell_transaction(self, symbol: str,
                                quantity: float, price: float,
                                transaction_date: str,
                                cost_basis_method: str = 'FIFO',
                                specific_lots: List[Dict] = None) -> Transaction
     
-    def get_user_transactions(self, user_id: str, symbol: str | None = None) -> List[Transaction]
+    def get_user_transactions(self, symbol: str | None = None) -> List[Transaction]
     
-    def get_position_lots(self, user_id: str, symbol: str = None) -> List[PositionLot]
+    def get_position_lots(self, symbol: str = None) -> List[PositionLot]
     
-    def get_position_summary(self, user_id: str, symbol: str = None) -> List[PositionSummary]
+    def get_position_summary(self, symbol: str = None) -> List[PositionSummary]
     
-    def get_sale_allocations(self, user_id: str, symbol: str = None) -> List[SaleAllocation]
+    def get_sale_allocations(self, symbol: str = None) -> List[SaleAllocation]
 ```
 
 #### 4.1.2 业务逻辑
@@ -233,14 +229,14 @@ class TransactionService:
 #### 4.2.2 计算逻辑
 ```python
 class PnLCalculator:
-    def calculate_daily_pnl(self, user_id: str, symbol: str, 
+    def calculate_daily_pnl(self, symbol: str, 
                           calculation_date: str, 
                           price_source: str = 'adj_close') -> DailyPnL
     
     def calculate_unrealized_pnl(self, lots: List[PositionLot], 
                                 market_price: float) -> float
     
-    def aggregate_realized_pnl(self, user_id: str, symbol: str, 
+    def aggregate_realized_pnl(self, symbol: str, 
                              date: str) -> float
     
     def get_weighted_avg_cost(self, lots: List[PositionLot]) -> float
@@ -260,7 +256,6 @@ class PnLCalculator:
 ```
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
     transaction_type TEXT NOT NULL CHECK (transaction_type IN ('BUY','SELL')),
     quantity REAL NOT NULL,
@@ -273,8 +268,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     FOREIGN KEY (symbol) REFERENCES stocks(symbol)
 );
 
-CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_id, transaction_date);
-CREATE INDEX IF NOT EXISTS idx_transactions_user_symbol_date ON transactions(user_id, symbol, transaction_date);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(transaction_date);
+CREATE INDEX IF NOT EXISTS idx_transactions_symbol_date ON transactions(symbol, transaction_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(transaction_type);
 ```
 
@@ -282,7 +277,6 @@ CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(transaction_typ
 ```
 CREATE TABLE IF NOT EXISTS position_lots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
     transaction_id INTEGER NOT NULL,  -- 关联的买入交易ID
     original_quantity REAL NOT NULL,  -- 原始买入数量
@@ -296,10 +290,10 @@ CREATE TABLE IF NOT EXISTS position_lots (
     FOREIGN KEY (symbol) REFERENCES stocks(symbol)
 );
 
-CREATE INDEX IF NOT EXISTS idx_position_lots_user_symbol ON position_lots(user_id, symbol);
-CREATE INDEX IF NOT EXISTS idx_position_lots_user_symbol_date ON position_lots(user_id, symbol, purchase_date);
+CREATE INDEX IF NOT EXISTS idx_position_lots_symbol ON position_lots(symbol);
+CREATE INDEX IF NOT EXISTS idx_position_lots_symbol_date ON position_lots(symbol, purchase_date);
 CREATE INDEX IF NOT EXISTS idx_position_lots_transaction ON position_lots(transaction_id);
-CREATE INDEX IF NOT EXISTS idx_position_lots_active ON position_lots(user_id, symbol, is_closed);
+CREATE INDEX IF NOT EXISTS idx_position_lots_active ON position_lots(symbol, is_closed);
 ```
 
 ### 5.3 卖出匹配表（sale_allocations）
@@ -325,7 +319,6 @@ CREATE INDEX IF NOT EXISTS idx_sale_allocations_lot ON sale_allocations(lot_id);
 ```
 CREATE TABLE IF NOT EXISTS daily_pnl (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
     symbol TEXT NOT NULL,
     valuation_date TEXT NOT NULL,
     quantity REAL NOT NULL,
@@ -338,11 +331,11 @@ CREATE TABLE IF NOT EXISTS daily_pnl (
     realized_pnl_pct REAL DEFAULT 0,
     total_cost REAL NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, symbol, valuation_date)
+    UNIQUE(symbol, valuation_date)
 );
 
-CREATE INDEX IF NOT EXISTS idx_daily_pnl_user_date ON daily_pnl(user_id, valuation_date);
-CREATE INDEX IF NOT EXISTS idx_daily_pnl_user_symbol ON daily_pnl(user_id, symbol);
+CREATE INDEX IF NOT EXISTS idx_daily_pnl_date ON daily_pnl(valuation_date);
+CREATE INDEX IF NOT EXISTS idx_daily_pnl_symbol ON daily_pnl(symbol);
 ```
 
 （企业行为与分红表可在后续扩展中加入，如 `corporate_actions`、`dividends`。）
@@ -352,34 +345,34 @@ CREATE INDEX IF NOT EXISTS idx_daily_pnl_user_symbol ON daily_pnl(user_id, symbo
 ### 6.1 CLI命令
 ```bash
 # 记录买入交易
-stock-trading buy --user-id user1 -s AAPL -q 100 -p 150.50 -d 2024-01-15
+stock-trading buy -s AAPL -q 100 -p 150.50 -d 2024-01-15
 
 # 记录卖出交易（FIFO方式）
-stock-trading sell --user-id user1 -s AAPL -q 50 -p 160.25 -d 2024-02-15
+stock-trading sell -s AAPL -q 50 -p 160.25 -d 2024-02-15
 
 # 记录卖出交易（指定成本基础方法）
-stock-trading sell --user-id user1 -s AAPL -q 30 -p 165.00 -d 2024-02-20 --basis LIFO
+stock-trading sell -s AAPL -q 30 -p 165.00 -d 2024-02-20 --basis LIFO
 
 # 记录卖出交易（指定特定批次）
-stock-trading sell --user-id user1 -s AAPL -q 20 -p 170.00 -d 2024-02-25 --specific-lots "lot_id:123,quantity:15;lot_id:124,quantity:5"
+stock-trading sell -s AAPL -q 20 -p 170.00 -d 2024-02-25 --specific-lots "lot_id:123,quantity:15;lot_id:124,quantity:5"
 
 # 查看持仓批次明细
-stock-trading lots --user-id user1 -s AAPL
+stock-trading lots -s AAPL
 
 # 查看持仓汇总
-stock-trading positions --user-id user1
+stock-trading positions
 
 # 查看卖出匹配历史
-stock-trading sales --user-id user1 -s AAPL
+stock-trading sales -s AAPL
 
 # 计算指定日期盈亏
-stock-trading calculate-pnl --user-id user1 --date 2024-02-20
+stock-trading calculate-pnl --date 2024-02-20
 
 # 批量计算历史盈亏
-stock-trading batch-calculate --user-id user1 --start-date 2024-01-01 --end-date 2024-02-29
+stock-trading batch-calculate --start-date 2024-01-01 --end-date 2024-02-29
 
 # 查看投资组合摘要
-stock-trading portfolio --user-id user1
+stock-trading portfolio
 
 # 通用参数
 #   --db-path database/stock_data.db
@@ -397,7 +390,6 @@ transaction_service = TransactionService()
 
 # 记录买入
 buy_transaction = transaction_service.record_buy_transaction(
-    user_id="user1",
     symbol="AAPL", 
     quantity=100,
     price=150.50,
@@ -406,7 +398,6 @@ buy_transaction = transaction_service.record_buy_transaction(
 
 # 记录卖出（FIFO方式）
 sell_transaction = transaction_service.record_sell_transaction(
-    user_id="user1",
     symbol="AAPL",
     quantity=50,
     price=160.25,
@@ -420,7 +411,6 @@ specific_lots = [
     {"lot_id": 124, "quantity": 20}
 ]
 sell_transaction = transaction_service.record_sell_transaction(
-    user_id="user1",
     symbol="AAPL",
     quantity=50,
     price=165.00,
@@ -430,15 +420,14 @@ sell_transaction = transaction_service.record_sell_transaction(
 )
 
 # 查看持仓批次
-lots = transaction_service.get_position_lots("user1", "AAPL")
+lots = transaction_service.get_position_lots("AAPL")
 
 # 查看持仓汇总
-summary = transaction_service.get_position_summary("user1", "AAPL")
+summary = transaction_service.get_position_summary("AAPL")
 
 # 计算盈亏
 pnl_calculator = PnLCalculator()
 daily_pnl = pnl_calculator.calculate_daily_pnl(
-    user_id="user1",
     symbol="AAPL",
     calculation_date="2024-02-20",
 )
@@ -454,7 +443,7 @@ daily_pnl = pnl_calculator.calculate_daily_pnl(
 - Schema/索引：在 StorageConfig 集中新增表名/字段/索引，并由 SQLiteSchemaManager.create_tables() 创建
 
 ### 7.2 扩展点
-- 多用户支持：通过 user_id 字段支持多用户
+- 多用户支持：可在应用层实现用户隔离
 - 多币种支持：预留 currency 字段
 - 分红处理：预留 dividends 相关表
 - 股票分割：预留 split 调整机制（成本基与股数换算）
@@ -479,7 +468,7 @@ daily_pnl = pnl_calculator.calculate_daily_pnl(
 2. **数据库Schema扩展**
    - 扩展StorageConfig：新增`position_lots`和`sale_allocations`表定义
    - 更新SQLiteSchemaManager：添加批次表建表SQL与索引
-   - 设计关键索引：`(user_id, symbol, purchase_date)`、`(user_id, symbol, is_closed)`等
+   - 设计关键索引：`(symbol, purchase_date)`、`(symbol, is_closed)`等
 
 3. **迁移策略**
    - 编写`migrate_to_lot_tracking.py`：从现有transactions生成PositionLot记录
@@ -500,8 +489,8 @@ daily_pnl = pnl_calculator.calculate_daily_pnl(
      - 创建对应PositionLot（original_quantity=quantity, remaining_quantity=quantity）
    
 2. **批次查询功能**
-   - `get_position_lots(user_id, symbol=None)`：获取用户所有有效批次
-   - `get_position_summary(user_id, symbol=None)`：汇总计算总持仓、平均成本等
+   - `get_position_lots(symbol=None)`：获取所有有效批次
+   - `get_position_summary(symbol=None)`：汇总计算总持仓、平均成本等
 
 3. **输入校验**
    - 数量、价格的合法性校验
@@ -534,7 +523,7 @@ daily_pnl = pnl_calculator.calculate_daily_pnl(
      - 汇总所有有效批次的未实现盈亏
 
 2. **已实现盈亏聚合**
-   - `aggregate_daily_realized_pnl(user_id, symbol, date)`
+   - `aggregate_daily_realized_pnl(symbol, date)`
      - 从当日所有SaleAllocation记录中汇总已实现盈亏
      - 支持跨多次卖出交易的聚合
 

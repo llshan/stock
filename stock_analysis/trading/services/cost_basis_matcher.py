@@ -33,10 +33,12 @@ class CostBasisMatcher(ABC):
         pass
     
     def _validate_sufficient_quantity(self, available_lots: List[PositionLot], 
-                                    sell_quantity: float) -> bool:
+                                    sell_quantity) -> bool:
         """验证是否有足够的持仓数量"""
-        total_available = sum(lot.remaining_quantity for lot in available_lots)
-        return total_available >= sell_quantity - 0.0001  # 考虑浮点精度
+        from decimal import Decimal
+        total_available = Decimal(str(sum(float(lot.remaining_quantity) for lot in available_lots)))
+        sell_quantity = Decimal(str(sell_quantity))
+        return total_available >= sell_quantity - Decimal('0.0001')  # 考虑浮点精度
 
 
 class FIFOMatcher(CostBasisMatcher):

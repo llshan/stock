@@ -6,16 +6,16 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+from decimal import Decimal
 
 
 @dataclass
 class Position:
     """股票持仓记录模型"""
-    user_id: str                    # 用户ID
     symbol: str                     # 股票代码
-    quantity: float                 # 持仓数量
-    avg_cost: float                 # 平均成本
-    total_cost: float               # 总成本（含佣金）
+    quantity: Decimal                 # 持仓数量
+    avg_cost: Decimal                 # 平均成本
+    total_cost: Decimal               # 总成本（含佣金）
     first_buy_date: str             # 首次买入日期（YYYY-MM-DD格式）
     last_transaction_date: str      # 最后交易日期（YYYY-MM-DD格式）
     is_active: bool = True          # 是否为活跃持仓
@@ -57,7 +57,6 @@ class Position:
         """转换为字典格式"""
         return {
             'id': self.id,
-            'user_id': self.user_id,
             'symbol': self.symbol,
             'quantity': self.quantity,
             'avg_cost': self.avg_cost,
@@ -90,7 +89,6 @@ class Position:
         
         return cls(
             id=data.get('id'),
-            user_id=data['user_id'],
             symbol=data['symbol'],
             quantity=data['quantity'],
             avg_cost=data['avg_cost'],
@@ -106,18 +104,17 @@ class Position:
 @dataclass
 class DailyPnL:
     """每日盈亏记录模型"""
-    user_id: str                    # 用户ID
     symbol: str                     # 股票代码
     valuation_date: str             # 估值日期（YYYY-MM-DD格式）
-    quantity: float                 # 持仓数量
-    avg_cost: float                 # 平均成本
-    market_price: float             # 市场价格（收盘价）
-    market_value: float             # 市场价值
-    unrealized_pnl: float           # 未实现盈亏
-    unrealized_pnl_pct: float       # 未实现盈亏百分比
-    total_cost: float               # 总成本
-    realized_pnl: float = 0.0       # 已实现盈亏
-    realized_pnl_pct: float = 0.0   # 已实现盈亏百分比
+    quantity: Decimal                 # 持仓数量
+    avg_cost: Decimal                 # 平均成本
+    market_price: Decimal             # 市场价格（收盘价）
+    market_value: Decimal             # 市场价值
+    unrealized_pnl: Decimal           # 未实现盈亏
+    unrealized_pnl_pct: Decimal       # 未实现盈亏百分比
+    total_cost: Decimal               # 总成本
+    realized_pnl: Decimal = Decimal('0.0')       # 当日已实现盈亏（聚合）
+    realized_pnl_pct: Decimal = Decimal('0.0')   # 当日已实现盈亏百分比
     price_date: Optional[str] = None  # 价格对应的实际日期
     is_stale_price: bool = False    # 是否为回填价格
     id: Optional[int] = None        # 数据库ID
@@ -147,7 +144,6 @@ class DailyPnL:
         """转换为字典格式"""
         return {
             'id': self.id,
-            'user_id': self.user_id,
             'symbol': self.symbol,
             'valuation_date': self.valuation_date,
             'quantity': self.quantity,
@@ -177,7 +173,6 @@ class DailyPnL:
         
         return cls(
             id=data.get('id'),
-            user_id=data['user_id'],
             symbol=data['symbol'],
             valuation_date=data['valuation_date'],
             quantity=data['quantity'],
@@ -195,7 +190,7 @@ class DailyPnL:
         )
 
     @classmethod
-    def calculate(cls, user_id: str, symbol: str, valuation_date: str,
+    def calculate(cls, symbol: str, valuation_date: str,
                   position: Position, market_price: float) -> 'DailyPnL':
         """基于持仓和市场价格计算每日盈亏"""
         if position.quantity == 0:
@@ -206,7 +201,6 @@ class DailyPnL:
         unrealized_pnl_pct = (unrealized_pnl / position.total_cost) * 100 if position.total_cost > 0 else 0.0
         
         return cls(
-            user_id=user_id,
             symbol=symbol,
             valuation_date=valuation_date,
             quantity=position.quantity,
