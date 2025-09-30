@@ -338,8 +338,13 @@ def _print_enhanced_analysis_chinese(analysis: dict):
     print("="*80)
     
     # 基础摘要
+    budget_total = 1000000  # 100万预算
+    remaining_cash = budget_total - basic['total_cost']
+    
     print("\n📈 组合概览:")
-    print(f"  总成本:     ${basic['total_cost']:,.2f}")
+    print(f"  投资预算:   ${budget_total:,.2f}")
+    print(f"  已投资:     ${basic['total_cost']:,.2f}")
+    print(f"  剩余现金:   ${remaining_cash:,.2f}")
     print(f"  当前市值:   ${basic['total_market_value']:,.2f}")
     print(f"  总盈亏:     ${basic['total_unrealized_pnl']:,.2f}")
     print(f"  收益率:     {basic['total_unrealized_pnl_pct']:.2f}%")
@@ -359,12 +364,12 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         name_header = pad_to_width('名称', 40)
         shares_header = pad_to_width('股数', 7)
         cost_header = pad_to_width('成本基础', 12)
-        value_header = pad_to_width('当前市值', 13)
+        value_header = pad_to_width('当前市值', 12)
         pnl_header = pad_to_width('盈亏', 7)
         return_header = pad_to_width('收益率', 6)
-        weight_header = pad_to_width('占比', 5)
+        weight_header = pad_to_width('投资额', 7)
         print(f"  | {ticker_header} | {name_header} | {shares_header} | {cost_header} | {value_header} | {pnl_header} | {return_header} | {weight_header} |")
-        print("  |----------|------------------------------------------|---------|--------------|---------------|---------|--------|-------|")
+        print("  |----------|------------------------------------------|---------|--------------|--------------|---------|--------|---------|")
         
         etf_total_shares = 0
         etf_total_cost = 0
@@ -396,12 +401,13 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             else:
                 return_str = f"{pnl_pct:.2f}%"
             
-            # 计算占总投资额的比例
-            weight_pct = (cost_basis / basic['total_cost'] * 100) if basic['total_cost'] > 0 else 0
-            weight_str = f"{weight_pct:.1f}%"
+            # 计算占100万预算的百分比
+            budget_total = 1000000
+            weight_pct = (cost_basis / budget_total * 100)
+            weight_str = f"{weight_pct:.2f}%"
             
             padded_name = pad_to_width(name, 40)
-            print(f"  | {pos['symbol']:8s} | {padded_name} | {shares:7.0f} | ${cost_basis:11,.0f} | ${market_value:12,.0f} | {pnl_str:>7s} | {return_str:>6s} | {weight_str:>5s} |")
+            print(f"  | {pos['symbol']:8s} | {padded_name} | {shares:7.0f} | ${cost_basis:11,.0f} | ${market_value:11,.0f} | {pnl_str:>7s} | {return_str:>6s} | {weight_str:>7s} |")
         
         # ETF小计
         etf_total_return = (etf_total_pnl / etf_total_cost * 100) if etf_total_cost > 0 else 0
@@ -415,13 +421,14 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         else:
             etf_return_str = f"{etf_total_return:.2f}%"
             
-        # ETF小计占比
-        etf_weight_pct = (etf_total_cost / basic['total_cost'] * 100) if basic['total_cost'] > 0 else 0
-        etf_weight_str = f"{etf_weight_pct:.1f}%"
+        # ETF小计占100万预算的百分比
+        budget_total = 1000000
+        etf_weight_pct = (etf_total_cost / budget_total * 100)
+        etf_weight_str = f"{etf_weight_pct:.2f}%"
         
-        print("  |----------|------------------------------------------|---------|--------------|---------------|---------|--------|-------|")
+        print("  |----------|------------------------------------------|---------|--------------|--------------|---------|--------|---------|")
         subtotal_name = pad_to_width('', 40)
-        print(f"  | Subtotal | {subtotal_name} | {etf_total_shares:7.0f} | ${etf_total_cost:11,.0f} | ${etf_total_value:12,.0f} | {etf_pnl_str:>7s} | {etf_return_str:>6s} | {etf_weight_str:>5s} |")
+        print(f"  | Subtotal | {subtotal_name} | {etf_total_shares:7.0f} | ${etf_total_cost:11,.0f} | ${etf_total_value:11,.0f} | {etf_pnl_str:>7s} | {etf_return_str:>6s} | {etf_weight_str:>7s} |")
     
     if 'stock_analysis' in sector_analysis:
         stock = sector_analysis['stock_analysis']
@@ -433,13 +440,13 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         company_header = pad_to_width('公司', 20)
         sector_header = pad_to_width('行业', 17)
         stock_shares_header = pad_to_width('股数', 7)
-        stock_cost_header = pad_to_width('成本基础', 10)
-        stock_value_header = pad_to_width('当前市值', 14)
-        stock_pnl_header = pad_to_width('盈亏', 8)
+        stock_cost_header = pad_to_width('成本基础', 12)
+        stock_value_header = pad_to_width('当前市值', 12)
+        stock_pnl_header = pad_to_width('盈亏', 7)
         stock_return_header = pad_to_width('收益率', 6)
-        stock_weight_header = pad_to_width('占比', 5)
+        stock_weight_header = pad_to_width('投资额', 7)
         print(f"  | {stock_ticker_header} | {company_header} | {sector_header} | {stock_shares_header} | {stock_cost_header} | {stock_value_header} | {stock_pnl_header} | {stock_return_header} | {stock_weight_header} |")
-        print("  |----------|----------------------|-------------------|---------|------------|----------------|----------|--------|-------|")
+        print("  |----------|----------------------|-------------------|---------|--------------|--------------|---------|--------|---------|")
         
         stock_total_shares = 0
         stock_total_cost = 0
@@ -472,13 +479,14 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             else:
                 return_str = f"{pnl_pct:.2f}%"
             
-            # 计算占总投资额的比例
-            stock_weight_pct = (cost_basis / basic['total_cost'] * 100) if basic['total_cost'] > 0 else 0
-            stock_weight_str = f"{stock_weight_pct:.1f}%"
+            # 计算占100万预算的百分比
+            budget_total = 1000000
+            stock_weight_pct = (cost_basis / budget_total * 100)
+            stock_weight_str = f"{stock_weight_pct:.2f}%"
             
             padded_company = pad_to_width(company, 20)
             padded_sector = pad_to_width(sector, 17)
-            print(f"  | {pos['symbol']:8s} | {padded_company} | {padded_sector} | {shares:7.0f} | ${cost_basis:9,.0f} | ${market_value:13,.0f} | {pnl_str:8s} | {return_str:6s} | {stock_weight_str:>5s} |")
+            print(f"  | {pos['symbol']:8s} | {padded_company} | {padded_sector} | {shares:7.0f} | ${cost_basis:11,.0f} | ${market_value:11,.0f} | {pnl_str:>7s} | {return_str:6s} | {stock_weight_str:>7s} |")
         
         # 个股小计
         stock_total_return = (stock_total_pnl / stock_total_cost * 100) if stock_total_cost > 0 else 0
@@ -492,14 +500,15 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         else:
             stock_return_str = f"{stock_total_return:.2f}%"
             
-        # 个股小计占比
-        stock_subtotal_weight_pct = (stock_total_cost / basic['total_cost'] * 100) if basic['total_cost'] > 0 else 0
-        stock_subtotal_weight_str = f"{stock_subtotal_weight_pct:.1f}%"
+        # 个股小计占100万预算的百分比
+        budget_total = 1000000
+        stock_subtotal_weight_pct = (stock_total_cost / budget_total * 100)
+        stock_subtotal_weight_str = f"{stock_subtotal_weight_pct:.2f}%"
         
-        print("  |----------|---------------------|--------------------|---------|------------|----------------|----------|--------|-------|")
+        print("  |----------|----------------------|-------------------|---------|--------------|--------------|---------|--------|---------|")
         subtotal_company = pad_to_width('', 20)
         subtotal_sector = pad_to_width('', 17)
-        print(f"  | Subtotal | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:9,.0f} | ${stock_total_value:13,.0f} | {stock_pnl_str:8s} | {stock_return_str:6s} | {stock_subtotal_weight_str:>5s} |")
+        print(f"  | Subtotal | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:11,.0f} | ${stock_total_value:11,.0f} | {stock_pnl_str:>7s} | {stock_return_str:6s} | {stock_subtotal_weight_str:>7s} |")
     
     # 平台分析
     print("\n🏦 平台分布:")
