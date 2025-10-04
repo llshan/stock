@@ -338,64 +338,60 @@ class PortfolioService:
             self.logger.warning(f"获取交易详情失败: {e}")
             return []
 
+    def _get_company_info(self, symbol: str) -> Dict[str, str]:
+        """从数据库获取公司信息"""
+        try:
+            query = """
+            SELECT company_name, sector, industry, description
+            FROM stocks WHERE symbol = ?
+            """
+            result = self.storage.cursor.execute(query, (symbol,)).fetchone()
+
+            if result and result[0]:  # 确保有公司名称
+                company_name, sector, industry, description = result
+
+                # 根据行业判断类型
+                stock_type = 'ETF' if 'ETF' in sector else '个股'
+
+                return {
+                    'type': stock_type,
+                    'category': company_name,
+                    'sector': sector or '其他',
+                    'company_name': company_name,
+                    'description': description or f'{symbol} 股票'
+                }
+            else:
+                # 回退到默认值
+                return {
+                    'type': '未知',
+                    'category': symbol,
+                    'sector': '其他',
+                    'company_name': symbol,
+                    'description': f'{symbol} 股票'
+                }
+        except Exception as e:
+            self.logger.warning(f"获取{symbol}公司信息失败: {e}")
+            return {
+                'type': '未知',
+                'category': symbol,
+                'sector': '其他',
+                'company_name': symbol,
+                'description': f'{symbol} 股票'
+            }
+
     def _analyze_by_sectors(self, positions: List[Dict]) -> Dict[str, Any]:
         """按行业分析持仓"""
-        # 股票类型分类（这里使用简单的分类，实际应该从数据库获取）
-        stock_categories = {
-            'SPY': {
-                'type': 'ETF', 
-                'category': 'SPDR S&P 500 ETF', 
-                'sector': '大盘指数',
-                'company_name': 'SPDR S&P 500 ETF Trust',
-                'description': '跟踪标普500指数的ETF基金'
-            },
-            'URTH': {
-                'type': 'ETF', 
-                'category': 'iShares Core MSCI全球市场ETF', 
-                'sector': '全球指数',
-                'company_name': 'iShares Core MSCI Total International Stock ETF',
-                'description': '跟踪全球市场的ETF基金'
-            },
-            'LULU': {
-                'type': '个股', 
-                'category': 'Lululemon Athletica', 
-                'sector': '非必需消费品',
-                'company_name': 'Lululemon Athletica Inc.',
-                'description': '高端运动服装和瑜伽用品零售商'
-            },
-            'MRK': {
-                'type': '个股', 
-                'category': 'Merck & Co', 
-                'sector': '医疗保健',
-                'company_name': 'Merck & Co., Inc.',
-                'description': '全球领先的制药和生物技术公司'
-            },
-            'PPC': {
-                'type': '个股', 
-                'category': "Pilgrim's Pride Corp", 
-                'sector': '必需消费品',
-                'company_name': "Pilgrim's Pride Corporation",
-                'description': '北美领先的家禽生产和加工公司'
-            },
-            'ALSN': {
-                'type': '个股', 
-                'category': 'Allison Transmission', 
-                'sector': '工业',
-                'company_name': 'Allison Transmission Holdings, Inc.',
-                'description': '商用车自动变速箱制造商'
-            }
-        }
-        
+
         etf_positions = []
         stock_positions = []
         etf_total_cost = 0.0
         etf_total_value = 0.0
         stock_total_cost = 0.0
         stock_total_value = 0.0
-        
+
         for pos in positions:
             symbol = pos['symbol']
-            category_info = stock_categories.get(symbol, {'type': '未知', 'category': '其他', 'sector': '其他'})
+            category_info = self._get_company_info(symbol)
             
             pos_with_category = pos.copy()
             pos_with_category.update(category_info)
@@ -428,49 +424,120 @@ class PortfolioService:
             }
         }
 
+    def _normalize_platform_name(self, platform_id: str) -> str:
+        """将平台ID转换为友好的平台名称"""
+        if not platform_id or platform_id == '未知平台':
+            return '未知平台'
+
+        # 检查是否包含ML或Merrill相关标识
+        if platform_id.upper().startswith('ML_') or 'merrill' in platform_id.lower():
+            return 'Merrill Edge'
+
+        # 检查是否包含Schwab相关标识
+        if platform_id.upper().startswith('SCHWAB_') or 'schwab' in platform_id.lower():
+            return 'Schwab'
+
+        # 检查notes字段是否包含平台信息
+        if 'Merrill Edge' in platform_id:
+            return 'Merrill Edge'
+        elif 'Schwab' in platform_id:
+            return 'Schwab'
+
+        # 默认返回原始名称
+        return platform_id
+
     def _analyze_by_platforms(self, positions: List[Dict], transactions: List[Dict]) -> Dict[str, Any]:
-        """按平台分析持仓"""
+        """按平台分析持仓 - 基于实际交易数据动态分配"""
+        # 从数据库获取每个position_lot的平台信息
+        platform_allocation = self._get_platform_allocation_from_lots()
+
+        # 初始化平台汇总
         platform_summary = {}
-        
-        # 按平台分组交易
-        for transaction in transactions:
-            platform = transaction.get('platform', '未知平台')
-            symbol = transaction['symbol']
-            
-            if platform not in platform_summary:
-                platform_summary[platform] = {
-                    'symbols': set(),
-                    'total_investment': 0.0,
-                    'transactions': []
-                }
-            
-            platform_summary[platform]['symbols'].add(symbol)
-            platform_summary[platform]['total_investment'] += transaction['quantity'] * transaction['price']
-            platform_summary[platform]['transactions'].append(transaction)
-        
-        # 计算每个平台的当前价值
+
+        # 分配持仓到各平台
+        for pos in positions:
+            symbol = pos['symbol']
+            symbol_allocations = platform_allocation.get(symbol, [])
+
+            for allocation in symbol_allocations:
+                platform = allocation['platform']
+                if platform not in platform_summary:
+                    platform_summary[platform] = {
+                        'symbols': set(),
+                        'total_investment': 0.0,
+                        'current_value': 0.0
+                    }
+
+                # 按实际份额分配投资成本和市值
+                # 使用股数比例而非成本比例来确保与原有逻辑一致
+                total_shares_for_symbol = sum(alloc['quantity'] for alloc in symbol_allocations)
+                share_ratio = allocation['quantity'] / total_shares_for_symbol if total_shares_for_symbol > 0 else 0
+
+                platform_summary[platform]['symbols'].add(symbol)
+                platform_summary[platform]['total_investment'] += allocation['cost']
+                platform_summary[platform]['current_value'] += pos['market_value'] * share_ratio
+
+        # 转换symbols为列表并计算汇总数据
         for platform, data in platform_summary.items():
             data['symbols'] = list(data['symbols'])
-            data['symbol_count'] = len(data['symbols'])
-            
-            # 计算当前市值（需要根据持仓分配）
-            current_value = 0.0
-            for pos in positions:
-                if pos['symbol'] in data['symbols'] and pos['market_value']:
-                    # 简化处理：按投资金额比例分配
-                    symbol_investment = sum(t['quantity'] * t['price'] for t in data['transactions'] 
-                                          if t['symbol'] == pos['symbol'])
-                    total_symbol_investment = sum(t['quantity'] * t['price'] for t in transactions 
-                                                if t['symbol'] == pos['symbol'])
-                    if total_symbol_investment > 0:
-                        allocation_ratio = symbol_investment / total_symbol_investment
-                        current_value += pos['market_value'] * allocation_ratio
-            
-            data['current_value'] = current_value
-            data['pnl'] = current_value - data['total_investment']
+            data['pnl'] = data['current_value'] - data['total_investment']
             data['return_pct'] = (data['pnl'] / data['total_investment'] * 100) if data['total_investment'] > 0 else 0
-        
+
         return platform_summary
+
+    def _get_platform_allocation_from_lots(self) -> Dict[str, List[Dict]]:
+        """从position_lots表获取每个股票在各平台的实际分配"""
+        try:
+            # 查询position_lots和transactions关联获取平台信息
+            query = """
+            SELECT
+                pl.symbol,
+                pl.original_quantity,
+                pl.cost_basis,
+                pl.original_quantity * pl.cost_basis as cost,
+                CASE
+                    WHEN pl.portfolio_id = 1 THEN 'Merrill Edge'
+                    WHEN pl.portfolio_id = 2 THEN 'Schwab'
+                    ELSE COALESCE(
+                        (SELECT CASE
+                            WHEN t.platform LIKE '%ml%' OR t.platform = 'ml' THEN 'Merrill Edge'
+                            WHEN t.platform LIKE '%schwab%' OR t.platform = 'schwab' THEN 'Schwab'
+                            ELSE t.platform
+                        END
+                        FROM transactions t
+                        WHERE t.symbol = pl.symbol
+                        AND t.quantity = pl.original_quantity
+                        AND t.price = pl.cost_basis
+                        LIMIT 1),
+                        'Unknown'
+                    )
+                END as platform
+            FROM position_lots pl
+            WHERE pl.is_closed = 0
+            ORDER BY pl.symbol, platform
+            """
+
+            rows = self.storage.cursor.execute(query).fetchall()
+
+            allocation = {}
+            for row in rows:
+                symbol = row[0]
+                if symbol not in allocation:
+                    allocation[symbol] = []
+
+                allocation[symbol].append({
+                    'quantity': row[1],
+                    'cost_basis': row[2],
+                    'cost': row[3],
+                    'platform': row[4]
+                })
+
+            return allocation
+
+        except Exception as e:
+            # 如果查询失败，返回空字典
+            print(f"Error getting platform allocation: {e}")
+            return {}
 
     def _calculate_risk_metrics(self, positions: List[Dict], total_cost: float) -> Dict[str, Any]:
         """计算风险指标"""
@@ -578,11 +645,10 @@ class PortfolioService:
             for pos in positions:
                 symbol = pos['symbol']  # 直接使用原始symbol，不添加.US后缀
                 
-                # 获取实际交易价格作为入场价格
+                # 获取加权平均成本作为入场价格 - 修正cost_basis为每股价格的问题
                 actual_entry_price_query = """
-                SELECT price FROM transactions 
-                WHERE symbol = ? AND transaction_type = 'BUY' 
-                ORDER BY transaction_date ASC LIMIT 1
+                SELECT SUM(cost_basis * original_quantity)/SUM(original_quantity) as avg_price FROM position_lots
+                WHERE symbol = ? AND remaining_quantity > 0
                 """
                 entry_result = self.storage.cursor.execute(actual_entry_price_query, (symbol,)).fetchone()
                 actual_entry_price = float(entry_result[0]) if entry_result else None
@@ -618,9 +684,9 @@ class PortfolioService:
         """获取首次购买日期"""
         try:
             query = """
-            SELECT MIN(transaction_date) 
-            FROM transactions 
-            WHERE symbol = ? AND transaction_type = 'BUY'
+            SELECT MIN(purchase_date)
+            FROM position_lots
+            WHERE symbol = ?
             """
             result = self.storage.cursor.execute(query, (symbol,)).fetchone()
             return result[0] if result and result[0] else '未知'
@@ -684,9 +750,21 @@ class PortfolioService:
 
     def _get_sector_for_symbol(self, symbol: str) -> str:
         """获取股票所属行业"""
+        try:
+            # 从数据库读取真实的行业信息
+            query = "SELECT sector FROM stocks WHERE symbol = ?"
+            result = self.storage.cursor.execute(query, (symbol,)).fetchone()
+            if result and result[0]:
+                return result[0]
+        except Exception as e:
+            self.logger.warning(f"无法从数据库获取{symbol}的行业信息: {e}")
+
+        # 回退到硬编码映射（保持向后兼容）
         sector_map = {
             'SPY': '大盘指数', 'URTH': '全球指数', 'LULU': '非必需消费品',
-            'MRK': '医疗保健', 'PPC': '必需消费品', 'ALSN': '工业'
+            'MRK': '医疗保健', 'PPC': '必需消费品', 'ALSN': '工业',
+            'ANF': '非必需消费品', 'MATX': '工业', 'OGN': '医疗保健',
+            'OMC': '传播服务'
         }
         return sector_map.get(symbol, '其他')
 
@@ -704,27 +782,37 @@ class PortfolioService:
         """使用OpenAI API生成投资策略洞察"""
         try:
             # 构建投资组合数据摘要
+            positions_data = []
+            data_validation_summary = []
+
+            for pos in positions:
+                pos_data = {
+                    "symbol": pos['symbol'],
+                    "shares": pos.get('shares', pos.get('quantity', 0)),
+                    "cost_basis": pos['avg_cost'],
+                    "current_value": pos['total_cost'],
+                    "weight": pos['total_cost'] / total_cost,
+                    "unrealized_pnl_pct": pos.get('unrealized_pnl_pct', 0),
+                    "sector": self._get_sector_for_symbol(pos['symbol'])
+                }
+                positions_data.append(pos_data)
+                # 动态构建数据验证摘要
+                pnl_pct = pos.get('unrealized_pnl_pct', 0)
+                data_validation_summary.append(f"{pos['symbol']}={pnl_pct:.2f}%")
+
             portfolio_data = {
                 "total_portfolio_value": total_cost,
-                "positions": [
-                    {
-                        "symbol": pos['symbol'],
-                        "shares": pos.get('shares', pos.get('quantity', 0)),
-                        "cost_basis": pos['avg_cost'],
-                        "current_value": pos['total_cost'],
-                        "weight": pos['total_cost'] / total_cost,
-                        "unrealized_pnl_pct": pos.get('unrealized_pnl_pct', 0),
-                        "sector": self._get_sector_for_symbol(pos['symbol'])
-                    }
-                    for pos in positions
-                ],
+                "positions": positions_data,
                 "risk_metrics": {
                     "sector_concentration": risk_assessment.get('sector_analysis', {}),
                     "volatility_score": risk_assessment.get('volatility_analysis', {}).get('portfolio_volatility_score', 1.0)
                 },
                 "performance": historical_performance
             }
-            
+
+            # 动态生成数据验证字符串
+            validation_text = ", ".join(data_validation_summary)
+
             prompt = f"""
 作为专业的投资顾问，请分析以下投资组合数据并提供策略洞察。
 
@@ -739,11 +827,13 @@ class PortfolioService:
 - grade: 等级评定（A, A-, B+, B, B-, C+）
 - summary: 一句话总结
 
-注意：
-1. 分析要基于实际数据，不要编造信息
-2. 建议要具体且可操作
-3. 考虑风险分散、行业配置、投资表现等因素
-4. 使用中文回复
+重要注意事项：
+1. **必须严格使用提供的实际数据**，特别是unrealized_pnl_pct字段的确切数值，不得修改或编造
+2. **数据验证参考**：{validation_text} - 这些是唯一准确的收益率数值
+3. 禁止使用任何未在上述数据中出现的收益率数字
+4. 建议要具体且可操作
+5. 考虑风险分散、行业配置、投资表现等因素
+6. 使用中文回复
 """
 
             response = self.openai_client.chat.completions.create(

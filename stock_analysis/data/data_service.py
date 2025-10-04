@@ -25,6 +25,7 @@ from .downloaders.base import DownloaderError
 from .models import (
     FinancialData,
     StockData,
+    BasicInfo,
 )
 from .models.quality_models import DownloadResult, BatchDownloadResult
 from .storage import create_storage
@@ -257,19 +258,25 @@ class DataService:
 
                 if include_financial:
                     financial_result = self.download_and_store_financial_data(symbol)
-                    # 聚合：以两者成功为总成功
-                    success = stock_result.success and financial_result.success
+                    # 改进逻辑：优雅降级 - 只要价格数据成功就认为成功
+                    # 这允许在财务数据不可用时仍能正常工作
+                    success = stock_result.success  # 主要以价格数据成功为准
                     # 记录主要策略
                     used_strategy = stock_result.used_strategy or financial_result.used_strategy
+
+                    # 如果财务数据也成功，标记为完全成功
+                    data_type = 'comprehensive' if financial_result.success else 'stock_with_failed_financial'
+
                     results[symbol] = DownloadResult(
                         success=success,
                         symbol=symbol,
-                        data_type='comprehensive',
+                        data_type=data_type,
                         data_points=stock_result.data_points + financial_result.data_points,
                         used_strategy=used_strategy,
                         metadata={
                             'stock': stock_result.to_dict(),
                             'financial': financial_result.to_dict(),
+                            'note': 'Financial data failed but stock data succeeded' if not financial_result.success and stock_result.success else None
                         },
                     )
                 else:
@@ -325,9 +332,9 @@ class DataService:
 
     # 内部工具
     def _ensure_stock_record(self, symbol: str) -> None:
-        """确保股票记录存在，直接创建空记录以满足外键约束。
+        """确保股票记录存在，并尝试填充基础公司信息。
 
-        仅为价格数据存储创建必要的stocks表记录，不强制下载财务数据。
+        仅为价格数据存储创建必要的stocks表记录，如果财务API不可用则使用基础信息。
         """
         try:
             existing = set(self.get_existing_symbols())
@@ -337,15 +344,73 @@ class DataService:
             # 如果无法读取现有列表，继续创建记录
             pass
 
-        # 直接创建空的股票记录，避免不必要的财务数据下载
         try:
+            # 首先尝试获取基础公司信息
+            basic_info = self._get_basic_company_info(symbol)
+
             # 使用公有方法确保股票记录存在
-            if hasattr(self.storage, 'ensure_stock_exists'):
+            if hasattr(self.storage, '_store_basic_info'):
+                self.storage._store_basic_info(symbol, basic_info)
+                self.logger.info(f"🪪 已创建股票记录并填充基础信息: {symbol}")
+            elif hasattr(self.storage, 'ensure_stock_exists'):
                 self.storage.ensure_stock_exists(symbol)
                 self.logger.info(f"🪪 已创建空股票记录: {symbol}")
             else:
                 self.logger.warning(
-                    f"Storage implementation does not support ensure_stock_exists for {symbol}"
+                    f"Storage implementation does not support stock record creation for {symbol}"
                 )
         except Exception as e:
             self.logger.error(f"❌ 创建股票记录失败 {symbol}: {e}")
+
+    def _get_basic_company_info(self, symbol: str) -> BasicInfo:
+        """获取基础公司信息，如果API不可用则使用回退信息"""
+        # 定义已知股票的基础信息映射
+        known_stocks = {
+            'AAPL': {'name': 'Apple Inc.', 'sector': '科技', 'industry': '消费电子'},
+            'MSFT': {'name': 'Microsoft Corporation', 'sector': '科技', 'industry': '软件'},
+            'GOOGL': {'name': 'Alphabet Inc.', 'sector': '科技', 'industry': '互联网'},
+            'TSLA': {'name': 'Tesla, Inc.', 'sector': '汽车', 'industry': '电动汽车'},
+            'AMZN': {'name': 'Amazon.com Inc.', 'sector': '科技', 'industry': '电子商务'},
+            'NVDA': {'name': 'NVIDIA Corporation', 'sector': '科技', 'industry': '半导体'},
+            'SPY': {'name': 'SPDR S&P 500 ETF Trust', 'sector': 'ETF', 'industry': '指数基金'},
+            'QQQ': {'name': 'Invesco QQQ Trust', 'sector': 'ETF', 'industry': '指数基金'},
+            'URTH': {'name': 'iShares MSCI World ETF', 'sector': 'ETF', 'industry': '指数基金'},
+            'LULU': {'name': 'Lululemon Athletica Inc.', 'sector': '消费品', 'industry': '服装零售'},
+            'MRK': {'name': 'Merck & Co., Inc.', 'sector': '医疗保健', 'industry': '制药'},
+            'PPC': {'name': 'Pilgrims Pride Corporation', 'sector': '消费品', 'industry': '食品加工'},
+            'ALSN': {'name': 'Allison Transmission Holdings, Inc.', 'sector': '工业', 'industry': '汽车零部件'},
+            'MATX': {'name': 'Matson, Inc.', 'sector': '工业', 'industry': '海运运输'},
+            'OGN': {'name': 'Organon & Co.', 'sector': '医疗保健', 'industry': '制药'},
+            'OMC': {'name': 'Omnicom Group Inc.', 'sector': '传播服务', 'industry': '广告营销'},
+        }
+
+        # 尝试从API获取（如果可用）
+        try:
+            financial_data = self.finnhub_downloader.download_financial_data(symbol)
+            if isinstance(financial_data, FinancialData) and financial_data.basic_info:
+                return financial_data.basic_info
+        except Exception:
+            # API不可用，使用回退信息
+            pass
+
+        # 使用已知信息或默认信息
+        if symbol in known_stocks:
+            info = known_stocks[symbol]
+            return BasicInfo(
+                company_name=info['name'],
+                sector=info['sector'],
+                industry=info['industry'],
+                market_cap=0,
+                employees=0,
+                description=f"{info['name']} - {info['industry']}"
+            )
+        else:
+            # 完全未知的股票，使用默认信息
+            return BasicInfo(
+                company_name=symbol,
+                sector='其他',
+                industry='未知',
+                market_cap=0,
+                employees=0,
+                description=f'{symbol} 股票'
+            )

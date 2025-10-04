@@ -1,9 +1,17 @@
-symbol, action, date, unit_cost, quantity, platform
-LULU, buy, 09/05/2025, 168, 120, ml
-PPC, buy, 09/10/2025, 42, 100, ml
-MRK, buy, 09/12/2025, 83.5, 120, ml
-SPY, buy, 09/17/2025, 656, 15, ml
-ALSN, buy, 09/23/2025, 87, 115, ml
-URTH, buy, 09/24/2025, 180, 60, ml
-SPY, buy, 09/24/2025, 662, 15, schwab
-URTH, buy, 09/24/2025, 180, 55, schwab
+symbol, action, date, unit_cost, quantity, platform, new
+LULU, buy, 09/05/2025, 168, 120, ml, n
+PPC, buy, 09/10/2025, 42, 100, ml, n
+MRK, buy, 09/12/2025, 83.5, 120, ml, n
+SPY, buy, 09/17/2025, 656, 15, ml, n
+ALSN, buy, 09/23/2025, 87, 115, ml, n
+URTH, buy, 09/24/2025, 180, 60, ml, n
+SPY, buy, 09/24/2025, 662, 15, schwab, n
+URTH, buy, 09/24/2025, 180, 55, schwab, n
+PPC, buy, 09/30/2025, 40.1, 100, schwab, n
+OGN, buy, 09/30/2025, 10.3, 500, schwab, n
+MATX, buy, 09/30/2025, 97.5, 50, schwab, n
+URTH, buy, 10/01/2025, 182, 28, schwab, n
+ANF, buy, 10/01/2025, 85.76, 59, schwab, n
+ANF, buy, 10/01/2025, 85.25, 1, schwab, n
+OMC, buy, 10/02/2025, 77, 65, schwab, n
+SPY, buy, 10/02/2025, 668, 6, schwab, n

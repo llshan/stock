@@ -41,6 +41,32 @@ from stock_analysis.trading import TransactionService, PortfolioService, PnLCalc
 from stock_analysis.trading.config import DEFAULT_TRADING_CONFIG, PriceSource
 
 
+def get_daily_pnl(symbol: str, shares: int) -> float:
+    """计算股票的当天盈亏"""
+    try:
+        from stock_analysis.data.storage import create_storage
+        storage = create_storage('sqlite')
+
+        # 获取最近两个交易日的价格
+        query = """
+        SELECT close, date FROM stock_prices
+        WHERE symbol = ?
+        ORDER BY date DESC
+        LIMIT 2
+        """
+        results = storage.cursor.execute(query, (symbol,)).fetchall()
+
+        if len(results) >= 2:
+            current_price = results[0][0]  # 今天的收盘价
+            previous_price = results[1][0]  # 昨天的收盘价
+            daily_change = (current_price - previous_price) * shares
+            return daily_change
+        else:
+            return 0.0
+    except Exception:
+        return 0.0
+
+
 def _storage_from_args(args: argparse.Namespace):
     return create_storage('sqlite', db_path=str(args.db_path))
 
@@ -361,74 +387,94 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         print(f"  📊 ETF基金 (交易所交易基金) - 占投资组合 {etf_pct:.1f}%")
         print()
         ticker_header = pad_to_width('代码', 8)
-        name_header = pad_to_width('名称', 40)
+        name_header = pad_to_width('名称', 30)
         shares_header = pad_to_width('股数', 7)
-        cost_header = pad_to_width('成本基础', 12)
-        value_header = pad_to_width('当前市值', 12)
-        pnl_header = pad_to_width('盈亏', 7)
-        return_header = pad_to_width('收益率', 6)
+        cost_header = pad_to_width('成本基础', 10)
+        value_header = pad_to_width('当前市值', 10)
+        daily_pnl_header = pad_to_width('当天盈亏', 10)
+        pnl_header = pad_to_width('总盈亏', 10)
+        return_header = pad_to_width('收益率', 7)
         weight_header = pad_to_width('投资额', 7)
-        print(f"  | {ticker_header} | {name_header} | {shares_header} | {cost_header} | {value_header} | {pnl_header} | {return_header} | {weight_header} |")
-        print("  |----------|------------------------------------------|---------|--------------|--------------|---------|--------|---------|")
+        print(f"  | {ticker_header} | {name_header} | {shares_header} | {cost_header} | {value_header} | {daily_pnl_header} | {pnl_header} | {return_header} | {weight_header} |")
+        print("  |----------|--------------------------------|---------|------------|------------|------------|------------|---------|---------|")
         
         etf_total_shares = 0
         etf_total_cost = 0
         etf_total_value = 0
         etf_total_pnl = 0
-        
+        etf_total_daily_pnl = 0
+
         for pos in etf['positions']:
             shares = pos.get('quantity', 0)
             cost_basis = pos.get('total_cost', 0)
             market_value = pos.get('market_value', 0)
             pnl = pos.get('unrealized_pnl', 0)
             pnl_pct = pos.get('unrealized_pnl_pct', 0)
-            name = pos.get('category', pos['symbol'])[:46]
-            
+            name = pos.get('category', pos['symbol'])[:30]
+
+            # 计算当天盈亏
+            daily_pnl = get_daily_pnl(pos['symbol'], shares)
+
             etf_total_shares += shares
             etf_total_cost += cost_basis
             etf_total_value += market_value
             etf_total_pnl += pnl
+            etf_total_daily_pnl += daily_pnl
             
-            # 格式化P&L
-            if pnl >= 0:
-                pnl_str = f"$+{pnl:,.0f}"
+            # 格式化当天盈亏
+            if daily_pnl >= 0:
+                daily_pnl_str = f"$+{daily_pnl:8,.0f}"
             else:
-                pnl_str = f"$-{abs(pnl):,.0f}"
-            
+                daily_pnl_str = f"${daily_pnl:8,.0f}"
+
+            # 格式化总盈亏
+            if pnl >= 0:
+                pnl_str = f"$+{pnl:8,.0f}"
+            else:
+                pnl_str = f"$-{abs(pnl):8.0f}"
+
             # 格式化Return
             if pnl_pct >= 0:
                 return_str = f"+{pnl_pct:.2f}%"
             else:
                 return_str = f"{pnl_pct:.2f}%"
-            
+
             # 计算占100万预算的百分比
             budget_total = 1000000
             weight_pct = (cost_basis / budget_total * 100)
             weight_str = f"{weight_pct:.2f}%"
-            
-            padded_name = pad_to_width(name, 40)
-            print(f"  | {pos['symbol']:8s} | {padded_name} | {shares:7.0f} | ${cost_basis:11,.0f} | ${market_value:11,.0f} | {pnl_str:>7s} | {return_str:>6s} | {weight_str:>7s} |")
+
+            padded_name = pad_to_width(name, 30)
+            print(f"  | {pos['symbol']:8s} | {padded_name} | {shares:7.0f} | ${cost_basis:9,.0f} | ${market_value:9,.0f} | {daily_pnl_str:>9s} | {pnl_str:>9s} | {return_str:>7s} | {weight_str:>7s} |")
         
         # ETF小计
         etf_total_return = (etf_total_pnl / etf_total_cost * 100) if etf_total_cost > 0 else 0
-        if etf_total_pnl >= 0:
-            etf_pnl_str = f"$+{etf_total_pnl:,.0f}"
+
+        # 格式化ETF总当天盈亏
+        if etf_total_daily_pnl >= 0:
+            etf_daily_pnl_str = f"$+{etf_total_daily_pnl:8,.0f}"
         else:
-            etf_pnl_str = f"${etf_total_pnl:,.0f}"
-        
+            etf_daily_pnl_str = f"${etf_total_daily_pnl:8,.0f}"
+
+        # 格式化ETF总盈亏
+        if etf_total_pnl >= 0:
+            etf_pnl_str = f"$+{etf_total_pnl:8,.0f}"
+        else:
+            etf_pnl_str = f"${etf_total_pnl:8,.0f}"
+
         if etf_total_return >= 0:
             etf_return_str = f"+{etf_total_return:.2f}%"
         else:
             etf_return_str = f"{etf_total_return:.2f}%"
-            
+
         # ETF小计占100万预算的百分比
         budget_total = 1000000
         etf_weight_pct = (etf_total_cost / budget_total * 100)
         etf_weight_str = f"{etf_weight_pct:.2f}%"
-        
-        print("  |----------|------------------------------------------|---------|--------------|--------------|---------|--------|---------|")
-        subtotal_name = pad_to_width('', 40)
-        print(f"  | Subtotal | {subtotal_name} | {etf_total_shares:7.0f} | ${etf_total_cost:11,.0f} | ${etf_total_value:11,.0f} | {etf_pnl_str:>7s} | {etf_return_str:>6s} | {etf_weight_str:>7s} |")
+
+        print("  |----------|--------------------------------|---------|------------|------------|------------|------------|---------|---------|")
+        subtotal_name = pad_to_width('', 30)
+        print(f"  | Subtotal | {subtotal_name} | {etf_total_shares:7.0f} | ${etf_total_cost:9,.0f} | ${etf_total_value:9,.0f} | {etf_daily_pnl_str:>8s} | {etf_pnl_str:>8s} | {etf_return_str:>7s} | {etf_weight_str:>7s} |")
     
     if 'stock_analysis' in sector_analysis:
         stock = sector_analysis['stock_analysis']
@@ -437,21 +483,23 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         print(f"  🏭 个股投资 - 占投资组合 {stock_pct:.1f}%")
         print()
         stock_ticker_header = pad_to_width('代码', 8)
-        company_header = pad_to_width('公司', 20)
-        sector_header = pad_to_width('行业', 17)
+        company_header = pad_to_width('公司', 19)
+        sector_header = pad_to_width('行业', 8)
         stock_shares_header = pad_to_width('股数', 7)
-        stock_cost_header = pad_to_width('成本基础', 12)
-        stock_value_header = pad_to_width('当前市值', 12)
-        stock_pnl_header = pad_to_width('盈亏', 7)
-        stock_return_header = pad_to_width('收益率', 6)
+        stock_cost_header = pad_to_width('成本基础', 10)
+        stock_value_header = pad_to_width('当前市值', 10)
+        stock_daily_pnl_header = pad_to_width('当天盈亏', 10)
+        stock_pnl_header = pad_to_width('总盈亏', 10)
+        stock_return_header = pad_to_width('收益率', 7)
         stock_weight_header = pad_to_width('投资额', 7)
-        print(f"  | {stock_ticker_header} | {company_header} | {sector_header} | {stock_shares_header} | {stock_cost_header} | {stock_value_header} | {stock_pnl_header} | {stock_return_header} | {stock_weight_header} |")
-        print("  |----------|----------------------|-------------------|---------|--------------|--------------|---------|--------|---------|")
-        
+        print(f"  | {stock_ticker_header} | {company_header} | {sector_header} | {stock_shares_header} | {stock_cost_header} | {stock_value_header} | {stock_daily_pnl_header} | {stock_pnl_header} | {stock_return_header} | {stock_weight_header} |")
+        print("  |----------|---------------------|----------|---------|------------|------------|------------|------------|---------|---------|")
+
         stock_total_shares = 0
         stock_total_cost = 0
         stock_total_value = 0
         stock_total_pnl = 0
+        stock_total_daily_pnl = 0
         
         for pos in stock['positions']:
             shares = pos.get('quantity', 0)
@@ -459,56 +507,74 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             market_value = pos.get('market_value', 0)
             pnl = pos.get('unrealized_pnl', 0)
             pnl_pct = pos.get('unrealized_pnl_pct', 0)
-            company = pos.get('category', pos['symbol'])[:20]
-            sector = pos.get('sector', '未知')[:17]
-            
+            company = pos.get('category', pos['symbol'])[:19]
+            sector = pos.get('sector', '未知')[:8]
+
+            # 计算当天盈亏
+            daily_pnl = get_daily_pnl(pos['symbol'], shares)
+
             stock_total_shares += shares
             stock_total_cost += cost_basis
             stock_total_value += market_value
             stock_total_pnl += pnl
-            
-            # 格式化P&L
-            if pnl >= 0:
-                pnl_str = f"$+{pnl:,.0f}"
+            stock_total_daily_pnl += daily_pnl
+
+            # 格式化当天盈亏
+            if daily_pnl >= 0:
+                daily_pnl_str = f"$+{daily_pnl:8,.0f}"
             else:
-                pnl_str = f"$-{abs(pnl):,.0f}"
-            
+                daily_pnl_str = f"$-{abs(daily_pnl):8,.0f}"
+
+            # 格式化总盈亏
+            if pnl >= 0:
+                pnl_str = f"$+{pnl:8,.0f}"
+            else:
+                pnl_str = f"$-{abs(pnl):8,.0f}"
+
             # 格式化Return
             if pnl_pct >= 0:
                 return_str = f"+{pnl_pct:.2f}%"
             else:
                 return_str = f"{pnl_pct:.2f}%"
-            
+
             # 计算占100万预算的百分比
             budget_total = 1000000
             stock_weight_pct = (cost_basis / budget_total * 100)
             stock_weight_str = f"{stock_weight_pct:.2f}%"
             
-            padded_company = pad_to_width(company, 20)
-            padded_sector = pad_to_width(sector, 17)
-            print(f"  | {pos['symbol']:8s} | {padded_company} | {padded_sector} | {shares:7.0f} | ${cost_basis:11,.0f} | ${market_value:11,.0f} | {pnl_str:>7s} | {return_str:6s} | {stock_weight_str:>7s} |")
+            padded_company = pad_to_width(company, 19)
+            padded_sector = pad_to_width(sector, 8)
+            print(f"  | {pos['symbol']:8s} | {padded_company} | {padded_sector} | {shares:7.0f} | ${cost_basis:9,.0f} | ${market_value:9,.0f} | {daily_pnl_str:>8s} | {pnl_str:>8s} | {return_str:>7s} | {stock_weight_str:>7s} |")
         
         # 个股小计
         stock_total_return = (stock_total_pnl / stock_total_cost * 100) if stock_total_cost > 0 else 0
-        if stock_total_pnl >= 0:
-            stock_pnl_str = f"$+{stock_total_pnl:,.0f}"
+
+        # 格式化个股总当天盈亏
+        if stock_total_daily_pnl >= 0:
+            stock_daily_pnl_str = f"$+{stock_total_daily_pnl:8,.0f}"
         else:
-            stock_pnl_str = f"${stock_total_pnl:,.0f}"
-        
+            stock_daily_pnl_str = f"$-{abs(stock_total_daily_pnl):8,.0f}"
+
+        # 格式化个股总盈亏
+        if stock_total_pnl >= 0:
+            stock_pnl_str = f"$+{stock_total_pnl:8,.0f}"
+        else:
+            stock_pnl_str = f"$-{abs(stock_total_pnl):8,.0f}"
+
         if stock_total_return >= 0:
             stock_return_str = f"+{stock_total_return:.2f}%"
         else:
             stock_return_str = f"{stock_total_return:.2f}%"
-            
+
         # 个股小计占100万预算的百分比
         budget_total = 1000000
         stock_subtotal_weight_pct = (stock_total_cost / budget_total * 100)
         stock_subtotal_weight_str = f"{stock_subtotal_weight_pct:.2f}%"
-        
-        print("  |----------|----------------------|-------------------|---------|--------------|--------------|---------|--------|---------|")
-        subtotal_company = pad_to_width('', 20)
-        subtotal_sector = pad_to_width('', 17)
-        print(f"  | Subtotal | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:11,.0f} | ${stock_total_value:11,.0f} | {stock_pnl_str:>7s} | {stock_return_str:6s} | {stock_subtotal_weight_str:>7s} |")
+
+        print("  |----------|---------------------|----------|---------|------------|------------|------------|------------|---------|---------|")
+        subtotal_company = pad_to_width('', 19)
+        subtotal_sector = pad_to_width('', 8) 
+        print(f"  | Subtotal | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:9,.0f} | ${stock_total_value:9,.0f} | {stock_daily_pnl_str:>8s} | {stock_pnl_str:>7s} | {stock_return_str:>7s} | {stock_subtotal_weight_str:>7s} |")
     
     # 平台分析
     print("\n🏦 平台分布:")
@@ -567,13 +633,15 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             print()
             stock_header = pad_to_width('股票', 5)
             date_header = pad_to_width('购买日期', 13)
-            entry_header = pad_to_width('入场价格', 11)
+            entry_header = pad_to_width('入场价格', 12)
             current_header = pad_to_width('当前价格', 12)
             change_header = pad_to_width('价格变化', 12)
             print(f"  | {stock_header} | {date_header} | {entry_header} | {current_header} | {change_header} |")
-            print("  |-------|---------------|-------------|--------------|--------------|")
+            print("  |-------|---------------|--------------|--------------|--------------|")
             
-            for symbol, data in hist_perf.items():
+            # 按涨幅排序（从高到低）
+            sorted_symbols = sorted(hist_perf.items(), key=lambda x: x[1].get('price_change_pct', 0), reverse=True)
+            for symbol, data in sorted_symbols:
                 entry_date = data.get('entry_date', '未知')
                 first_price = data.get('first_price', 0)
                 current_price = data.get('current_price', 0)
@@ -594,17 +662,14 @@ def _print_enhanced_analysis_chinese(analysis: dict):
                 trend_symbol = "🟢" if price_change >= 0 else "🔴"
                 price_change_sign = "+" if price_change >= 0 else ""
                 
-                # 为非首次购买的股票添加星号
-                entry_price_display = f"${first_price:.2f}"
-                if symbol in ['SPY', 'URTH', 'ALSN', 'PPC', 'MRK']:  # 这些不是首次购买日期
-                    entry_price_display += "*"
+                entry_price_display = f"${first_price:11,.0f}"
                 
                 padded_date = pad_to_width(formatted_date, 13)
-                current_price_str = f"${current_price:.2f}"
+                current_price_str = f"${current_price:11,.0f}"
                 padded_current = pad_to_width(current_price_str, 12)
                 price_change_str = f"{price_change_sign}{price_change:.2f}% {trend_symbol}"
                 padded_change = pad_to_width(price_change_str, 12)
-                print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:11s} | {padded_current} | {padded_change} |")
+                print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:12s} | {padded_current} | {padded_change} |")
 
     # 投资策略洞察
     if 'strategy_insights' in analysis:
