@@ -836,9 +836,9 @@ class SQLiteStorage(BaseStorage):
         fields = f"{F.SYMBOL}, {F.PositionLots.TRANSACTION_ID}, " \
                 f"{F.PositionLots.ORIGINAL_QUANTITY}, {F.PositionLots.REMAINING_QUANTITY}, " \
                 f"{F.PositionLots.COST_BASIS}, {F.PositionLots.PURCHASE_DATE}, " \
-                f"{F.PositionLots.IS_CLOSED}, {F.CREATED_AT}, {F.UPDATED_AT}"
-        
-        placeholders = "?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
+                f"{F.PositionLots.IS_CLOSED}, {F.PositionLots.PORTFOLIO_ID}, {F.CREATED_AT}, {F.UPDATED_AT}"
+
+        placeholders = "?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP"
         
         sql = f"INSERT INTO {T} ({fields}) VALUES ({placeholders})"
         
@@ -852,6 +852,7 @@ class SQLiteStorage(BaseStorage):
                 float(lot_data['cost_basis']),
                 lot_data['purchase_date'],
                 lot_data.get('is_closed', False),
+                lot_data.get('portfolio_id', 1),  # 默认为1 (Merrill Edge)
             ),
         )
         

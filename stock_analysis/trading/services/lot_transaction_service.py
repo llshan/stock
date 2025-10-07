@@ -128,8 +128,8 @@ class LotTransactionService:
             
             # 2. 创建对应的持仓批次
             self._create_position_lot_from_buy(
-                transaction_id, symbol, quantity, price, 
-                transaction_date
+                transaction_id, symbol, quantity, price,
+                transaction_date, platform
             )
             
             # 构造返回的交易对象
@@ -306,11 +306,14 @@ class LotTransactionService:
         return allocations
     
     def _create_position_lot_from_buy(self, transaction_id: int, symbol: str, quantity: Decimal, price: Decimal,
-                                    transaction_date: str) -> int:
+                                    transaction_date: str, platform: str = None) -> int:
         """从买入交易创建持仓批次"""
         # 成本基础就是买入价格，因为没有佣金
         cost_basis = price
-        
+
+        # 根据platform确定portfolio_id
+        portfolio_id = self._get_portfolio_id_from_platform(platform)
+
         lot_data = {
             'symbol': symbol,
             'transaction_id': transaction_id,
@@ -318,12 +321,26 @@ class LotTransactionService:
             'remaining_quantity': quantity,  # 初始时剩余=原始
             'cost_basis': cost_basis,
             'purchase_date': transaction_date,
-            'is_closed': False
+            'is_closed': False,
+            'portfolio_id': portfolio_id
         }
         
         lot_id = self.storage.create_position_lot(lot_data)
-        self.logger.debug(f"    📦 创建批次: ID={lot_id}, {quantity:.4f}@{cost_basis:.4f}")
+        self.logger.debug(f"    📦 创建批次: ID={lot_id}, {quantity:.4f}@{cost_basis:.4f}, portfolio={portfolio_id}")
         return lot_id
+
+    def _get_portfolio_id_from_platform(self, platform: str = None) -> int:
+        """根据平台名称获取portfolio_id"""
+        if platform is None:
+            return 1  # 默认为Merrill Edge
+
+        platform_lower = platform.lower()
+        if platform_lower == 'schwab':
+            return 2
+        elif platform_lower in ['ml', 'merrill', 'merrill edge']:
+            return 1
+        else:
+            return 1  # 默认为Merrill Edge
     
     def get_position_lots(self, symbol: str = None, 
                          active_only: bool = True) -> List[PositionLot]:

@@ -157,6 +157,7 @@ class StorageConfig:
             COST_BASIS = "cost_basis"
             PURCHASE_DATE = "purchase_date"
             IS_CLOSED = "is_closed"
+            PORTFOLIO_ID = "portfolio_id"
         
         # 卖出分配字段（新增）
         class SaleAllocations:

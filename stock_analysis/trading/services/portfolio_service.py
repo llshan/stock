@@ -631,7 +631,7 @@ class PortfolioService:
             recommendations.append(f"关注{worst['symbol']}的下跌，当前跌幅{worst.get('unrealized_pnl_pct', 0):.1f}%")
         
         # ETF vs 个股比例
-        etf_count = sum(1 for pos in positions if pos['symbol'] in ['SPY', 'URTH'])
+        etf_count = sum(1 for pos in positions if pos['symbol'] in ['SPY', 'URTH', 'VGT'])
         if etf_count / len(positions) < 0.3:
             recommendations.append("考虑增加ETF配置以降低个股风险")
         
@@ -761,7 +761,7 @@ class PortfolioService:
 
         # 回退到硬编码映射（保持向后兼容）
         sector_map = {
-            'SPY': '大盘指数', 'URTH': '全球指数', 'LULU': '非必需消费品',
+            'SPY': '大盘指数', 'URTH': '全球指数', 'VGT': '科技ETF', 'LULU': '非必需消费品',
             'MRK': '医疗保健', 'PPC': '必需消费品', 'ALSN': '工业',
             'ANF': '非必需消费品', 'MATX': '工业', 'OGN': '医疗保健',
             'OMC': '传播服务'
@@ -876,7 +876,7 @@ class PortfolioService:
         recommendations = []
         
         # 分析优势
-        etf_count = sum(1 for pos in positions if pos['symbol'] in ['SPY', 'URTH'])
+        etf_count = sum(1 for pos in positions if pos['symbol'] in ['SPY', 'URTH', 'VGT'])
         if etf_count >= 2:
             strengths.append("多元化基础：ETF基金提供了良好的市场暴露")
         
