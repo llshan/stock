@@ -425,7 +425,7 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             if daily_pnl >= 0:
                 daily_pnl_str = f"$+{daily_pnl:8,.0f}"
             else:
-                daily_pnl_str = f"${daily_pnl:8,.0f}"
+                daily_pnl_str = f"$-{abs(daily_pnl):8,.0f}"
 
             # 格式化总盈亏
             if pnl >= 0:
@@ -454,7 +454,7 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         if etf_total_daily_pnl >= 0:
             etf_daily_pnl_str = f"$+{etf_total_daily_pnl:8,.0f}"
         else:
-            etf_daily_pnl_str = f"${etf_total_daily_pnl:8,.0f}"
+            etf_daily_pnl_str = f"$-{abs(etf_total_daily_pnl):8,.0f}"
 
         # 格式化ETF总盈亏
         if etf_total_pnl >= 0:
@@ -474,7 +474,7 @@ def _print_enhanced_analysis_chinese(analysis: dict):
 
         print("  |----------|--------------------------------|---------|------------|------------|------------|------------|---------|---------|")
         subtotal_name = pad_to_width('', 30)
-        print(f"  | Subtotal | {subtotal_name} | {etf_total_shares:7.0f} | ${etf_total_cost:9,.0f} | ${etf_total_value:9,.0f} | {etf_daily_pnl_str:>8s} | {etf_pnl_str:>8s} | {etf_return_str:>7s} | {etf_weight_str:>7s} |")
+        print(f"  |   总计   | {subtotal_name} | {etf_total_shares:7.0f} | ${etf_total_cost:9,.0f} | ${etf_total_value:9,.0f} | {etf_daily_pnl_str:>8s} | {etf_pnl_str:>8s} | {etf_return_str:>7s} | {etf_weight_str:>7s} |")
     
     if 'stock_analysis' in sector_analysis:
         stock = sector_analysis['stock_analysis']
@@ -574,7 +574,7 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         print("  |----------|---------------------|----------|---------|------------|------------|------------|------------|---------|---------|")
         subtotal_company = pad_to_width('', 19)
         subtotal_sector = pad_to_width('', 8) 
-        print(f"  | Subtotal | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:9,.0f} | ${stock_total_value:9,.0f} | {stock_daily_pnl_str:>8s} | {stock_pnl_str:>7s} | {stock_return_str:>7s} | {stock_subtotal_weight_str:>7s} |")
+        print(f"  |   总计   | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:9,.0f} | ${stock_total_value:9,.0f} | {stock_daily_pnl_str:>8s} | {stock_pnl_str:>7s} | {stock_return_str:>7s} | {stock_subtotal_weight_str:>7s} |")
     
     # 平台分析
     print("\n🏦 平台分布:")
@@ -632,7 +632,7 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             print(f"\n📅 股价表现分析 (9月5日 - {today}, 2025)")
             print()
             stock_header = pad_to_width('股票', 5)
-            date_header = pad_to_width('购买日期', 13)
+            date_header = pad_to_width('入场日期', 13)
             entry_header = pad_to_width('入场价格', 12)
             current_header = pad_to_width('当前价格', 12)
             change_header = pad_to_width('价格变化', 12)
@@ -645,14 +645,14 @@ def _print_enhanced_analysis_chinese(analysis: dict):
                 entry_date = data.get('entry_date', '未知')
                 first_price = data.get('first_price', 0)
                 current_price = data.get('current_price', 0)
-                price_change = data.get('price_change_pct', 0)
+                price_change = data.get('price_change_pct', 0) / 100
                 
                 # 格式化日期 (从 YYYY-MM-DD 转换为 Sep 5 格式)
                 if entry_date and entry_date != '未知':
                     try:
                         from datetime import datetime
                         date_obj = datetime.strptime(entry_date, '%Y-%m-%d')
-                        formatted_date = date_obj.strftime('%b %-d')
+                        formatted_date = date_obj.strftime('%Y-%m-%d')
                     except:
                         formatted_date = entry_date
                 else:
@@ -662,12 +662,12 @@ def _print_enhanced_analysis_chinese(analysis: dict):
                 trend_symbol = "🟢" if price_change >= 0 else "🔴"
                 price_change_sign = "+" if price_change >= 0 else ""
                 
-                entry_price_display = f"${first_price:11,.0f}"
+                entry_price_display = f"${first_price:11,.2f}"
                 
                 padded_date = pad_to_width(formatted_date, 13)
-                current_price_str = f"${current_price:11,.0f}"
+                current_price_str = f"${current_price:11,.2f}"
                 padded_current = pad_to_width(current_price_str, 12)
-                price_change_str = f"{price_change_sign}{price_change:.2f}% {trend_symbol}"
+                price_change_str = f"{trend_symbol}  {price_change_sign}{price_change:.2%}"
                 padded_change = pad_to_width(price_change_str, 12)
                 print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:12s} | {padded_current} | {padded_change} |")
 
