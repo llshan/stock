@@ -24,3 +24,9 @@ SPY, buy, 10/06/2025, 671, 30, schwab, n
 VGT, buy, 10/07/2025, 756, 15, schwab, n
 SPY, buy, 10/07/2025, 670, 25, schwab, n
 ITRN, buy, 10/07/2025, 36, 35, schwab, n
+ANF, buy, 10/09/2025, 76.25, 65, schwab, n
+URTH, buy, 10/09/2025, 183, 150, schwab, n
+PPC, buy, 10/09/2025, 37.9, 150, schwab, n
+QCOM, buy, 10/10/2025, 154.9, 15, schwab, n
+MATX, buy, 10/10/2025, 88.6, 50, schwab, n
+URTH, buy, 10/10/2025, 179.3, 120, schwab, n
