@@ -475,7 +475,9 @@ class PortfolioService:
 
                 platform_summary[platform]['symbols'].add(symbol)
                 platform_summary[platform]['total_investment'] += allocation['cost']
-                platform_summary[platform]['current_value'] += pos['market_value'] * share_ratio
+                # Only add to current_value if market_value is not None
+                if pos['market_value'] is not None:
+                    platform_summary[platform]['current_value'] += pos['market_value'] * share_ratio
 
         # 转换symbols为列表并计算汇总数据
         for platform, data in platform_summary.items():
@@ -580,13 +582,26 @@ class PortfolioService:
         if not positions:
             return {'message': '无表现数据'}
         
-        # 分类表现
-        winners = [pos for pos in positions if pos.get('unrealized_pnl', 0) > 0]
-        losers = [pos for pos in positions if pos.get('unrealized_pnl', 0) < 0]
-        
-        # 最佳和最差表现
-        best_performer = max(positions, key=lambda x: x.get('unrealized_pnl_pct', 0))
-        worst_performer = min(positions, key=lambda x: x.get('unrealized_pnl_pct', 0))
+        # 分类表现 - filter out positions with None values
+        winners = [pos for pos in positions if pos.get('unrealized_pnl') is not None and pos.get('unrealized_pnl', 0) > 0]
+        losers = [pos for pos in positions if pos.get('unrealized_pnl') is not None and pos.get('unrealized_pnl', 0) < 0]
+
+        # 最佳和最差表现 - only consider positions with valid P&L data
+        positions_with_pnl = [pos for pos in positions if pos.get('unrealized_pnl_pct') is not None]
+        if not positions_with_pnl:
+            # No positions have P&L data yet
+            return {
+                'winners': 0,
+                'losers': 0,
+                'neutral': len(positions),
+                'best_performer': None,
+                'worst_performer': None,
+                'winner_ratio': 0,
+                'message': '等待价格数据更新'
+            }
+
+        best_performer = max(positions_with_pnl, key=lambda x: x.get('unrealized_pnl_pct', 0))
+        worst_performer = min(positions_with_pnl, key=lambda x: x.get('unrealized_pnl_pct', 0))
         
         return {
             'winners': len(winners),
@@ -625,7 +640,7 @@ class PortfolioService:
             recommendations.append("增加持仓品种数量以提高分散化程度")
         
         # 表现分析
-        losers = [pos for pos in positions if pos.get('unrealized_pnl_pct', 0) < -5]
+        losers = [pos for pos in positions if pos.get('unrealized_pnl_pct') is not None and pos.get('unrealized_pnl_pct', 0) < -5]
         if losers:
             worst = min(losers, key=lambda x: x.get('unrealized_pnl_pct', 0))
             recommendations.append(f"关注{worst['symbol']}的下跌，当前跌幅{worst.get('unrealized_pnl_pct', 0):.1f}%")
@@ -789,8 +804,9 @@ class PortfolioService:
                 pos_data = {
                     "symbol": pos['symbol'],
                     "shares": pos.get('shares', pos.get('quantity', 0)),
-                    "cost_basis": pos['avg_cost'],
-                    "current_value": pos['total_cost'],
+                    "cost_basis_per_share": pos['avg_cost'],  # 每股平均成本
+                    "total_cost_basis": pos['total_cost'],  # 总投资成本
+                    "current_market_value": pos.get('market_value', pos['total_cost']),  # 当前市值
                     "weight": pos['total_cost'] / total_cost,
                     "unrealized_pnl_pct": pos.get('unrealized_pnl_pct', 0),
                     "sector": self._get_sector_for_symbol(pos['symbol'])
@@ -828,7 +844,7 @@ class PortfolioService:
 - summary: 一句话总结
 
 重要注意事项：
-1. **必须严格使用提供的实际数据**，特别是unrealized_pnl_pct字段的确切数值，不得修改或编造
+1. **必须严格使用提供的实际数据**，特别是每只股票的收益率，不得修改或编造任何数字
 2. **数据验证参考**：{validation_text} - 这些是唯一准确的收益率数值
 3. 禁止使用任何未在上述数据中出现的收益率数字
 4. 建议要具体且可操作
@@ -836,10 +852,32 @@ class PortfolioService:
 6. 使用中文回复
 """
 
+            system_prompt = """你是一位资深投资组合分析师，拥有15年+买方机构投资经验，曾在顶级对冲基金和资产管理公司工作。
+
+## 核心能力
+- **投资组合优化**：精通马科维茨理论、资本资产定价模型(CAPM)、夏普比率等现代投资组合理论
+- **风险量化分析**：擅长计算和解读VaR、最大回撤、贝塔系数、波动率、集中度风险等关键指标
+- **行业轮动策略**：深刻理解经济周期与行业相关性，能识别防御性、周期性、成长性板块的配置时机
+- **数据驱动决策**：基于历史表现、估值水平、技术面综合分析，给出量化支持的投资建议
+
+## 分析准则（必须严格遵守）
+1. **数据真实性第一**：使用且仅使用提供的实际数字，收益率必须精确到小数点后两位，禁止任何形式的数字编造、四舍五入或"优化"
+2. **客观中立**：以第三方视角评估，优势与风险并重，不偏袒任何观点
+3. **建议可执行**：每条建议必须具体明确（如"将LULU仓位从18%降至12%"），避免模糊表述（如"适当减仓"）
+4. **专业术语规范**：使用投资界标准术语，中英文对照准确
+
+## 输出要求
+- 优势（strengths）：基于数据的客观优点，3-5条
+- 改进领域（improvements）：当前存在的具体问题和风险点，2-4条
+- 投资建议（recommendations）：可立即执行的具体操作建议，3-5条，包含明确的股票代码和目标仓位
+- 总体评分（overall_score）：60-100分，基于风险收益平衡、分散化程度、行业配置合理性综合评定
+- 等级评定（grade）：A, A-, B+, B, B-, C+，对应不同评分区间
+- 一句话总结（summary）：高度概括投资组合的核心特征和主要问题"""
+
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "你是一位专业的投资顾问，擅长投资组合分析和风险管理。"},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
@@ -925,8 +963,8 @@ class PortfolioService:
         
         # 表现不佳股票监控
         poor_performers = [
-            pos for pos in positions 
-            if pos.get('unrealized_pnl_pct', 0) < -5
+            pos for pos in positions
+            if pos.get('unrealized_pnl_pct') is not None and pos.get('unrealized_pnl_pct', 0) < -5
         ]
         
         if poor_performers:

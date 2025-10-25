@@ -314,9 +314,13 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
         print("  (none)")
     else:
         for p in positions:
+            mv = p.get('market_value')
+            mv_str = f"{mv:,.2f}" if mv is not None else "N/A"
+            unreal = p.get('unrealized_pnl')
+            unreal_str = f"{unreal:,.2f}" if unreal is not None else "N/A"
             print(
                 f"  {p['symbol']:8s} qty={p['quantity']:,.4f} avg={p['avg_cost']:,.4f} "
-                f"mv={p.get('market_value', 0):,.2f} unreal={p.get('unrealized_pnl', 0):,.2f}"
+                f"mv={mv_str} unreal={unreal_str}"
             )
     storage.close()
     return 0
@@ -417,8 +421,11 @@ def _print_enhanced_analysis_chinese(analysis: dict):
 
             etf_total_shares += shares
             etf_total_cost += cost_basis
-            etf_total_value += market_value
-            etf_total_pnl += pnl
+            # Only add if market_value and pnl are not None
+            if market_value is not None:
+                etf_total_value += market_value
+            if pnl is not None:
+                etf_total_pnl += pnl
             etf_total_daily_pnl += daily_pnl
             
             # 格式化当天盈亏
@@ -460,7 +467,7 @@ def _print_enhanced_analysis_chinese(analysis: dict):
         if etf_total_pnl >= 0:
             etf_pnl_str = f"$+{etf_total_pnl:8,.0f}"
         else:
-            etf_pnl_str = f"${etf_total_pnl:8,.0f}"
+            etf_pnl_str = f"$-{abs(etf_total_pnl):8,.0f}"
 
         if etf_total_return >= 0:
             etf_return_str = f"+{etf_total_return:.2f}%"
@@ -515,8 +522,11 @@ def _print_enhanced_analysis_chinese(analysis: dict):
 
             stock_total_shares += shares
             stock_total_cost += cost_basis
-            stock_total_value += market_value
-            stock_total_pnl += pnl
+            # Only add if market_value and pnl are not None
+            if market_value is not None:
+                stock_total_value += market_value
+            if pnl is not None:
+                stock_total_pnl += pnl
             stock_total_daily_pnl += daily_pnl
 
             # 格式化当天盈亏
@@ -526,25 +536,37 @@ def _print_enhanced_analysis_chinese(analysis: dict):
                 daily_pnl_str = f"$-{abs(daily_pnl):8,.0f}"
 
             # 格式化总盈亏
-            if pnl >= 0:
-                pnl_str = f"$+{pnl:8,.0f}"
+            if pnl is not None:
+                if pnl >= 0:
+                    pnl_str = f"$+{pnl:8,.0f}"
+                else:
+                    pnl_str = f"$-{abs(pnl):8,.0f}"
             else:
-                pnl_str = f"$-{abs(pnl):8,.0f}"
+                pnl_str = "N/A"
 
             # 格式化Return
-            if pnl_pct >= 0:
-                return_str = f"+{pnl_pct:.2f}%"
+            if pnl_pct is not None:
+                if pnl_pct >= 0:
+                    return_str = f"+{pnl_pct:.2f}%"
+                else:
+                    return_str = f"{pnl_pct:.2f}%"
             else:
-                return_str = f"{pnl_pct:.2f}%"
+                return_str = "N/A"
 
             # 计算占100万预算的百分比
             budget_total = 1000000
             stock_weight_pct = (cost_basis / budget_total * 100)
             stock_weight_str = f"{stock_weight_pct:.2f}%"
-            
+
+            # 格式化市值
+            if market_value is not None:
+                mv_str = f"${market_value:9,.0f}"
+            else:
+                mv_str = "N/A"
+
             padded_company = pad_to_width(company, 19)
             padded_sector = pad_to_width(sector, 8)
-            print(f"  | {pos['symbol']:8s} | {padded_company} | {padded_sector} | {shares:7.0f} | ${cost_basis:9,.0f} | ${market_value:9,.0f} | {daily_pnl_str:>8s} | {pnl_str:>8s} | {return_str:>7s} | {stock_weight_str:>7s} |")
+            print(f"  | {pos['symbol']:8s} | {padded_company} | {padded_sector} | {shares:7.0f} | ${cost_basis:9,.0f} | {mv_str:>10s} | {daily_pnl_str:>8s} | {pnl_str:>9s} | {return_str:>7s} | {stock_weight_str:>7s} |")
         
         # 个股小计
         stock_total_return = (stock_total_pnl / stock_total_cost * 100) if stock_total_cost > 0 else 0
@@ -634,19 +656,30 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             stock_header = pad_to_width('股票', 5)
             date_header = pad_to_width('入场日期', 13)
             entry_header = pad_to_width('入场价格', 12)
+            cost_header = pad_to_width('成本基础', 12)
             current_header = pad_to_width('当前价格', 12)
             change_header = pad_to_width('价格变化', 12)
-            print(f"  | {stock_header} | {date_header} | {entry_header} | {current_header} | {change_header} |")
-            print("  |-------|---------------|--------------|--------------|--------------|")
+            print(f"  | {stock_header} | {date_header} | {entry_header} | {cost_header} | {current_header} | {change_header} |")
+            print("  |-------|---------------|--------------|--------------|--------------|--------------|")
             
             # 按涨幅排序（从高到低）
             sorted_symbols = sorted(hist_perf.items(), key=lambda x: x[1].get('price_change_pct', 0), reverse=True)
+
+            # 获取持仓数据以便获取成本基础（总投入金额）
+            positions_data = {}
+            if 'basic_summary' in analysis and 'positions' in analysis['basic_summary']:
+                for pos in analysis['basic_summary']['positions']:
+                    positions_data[pos['symbol']] = pos.get('total_cost', 0)
+
             for symbol, data in sorted_symbols:
                 entry_date = data.get('entry_date', '未知')
                 first_price = data.get('first_price', 0)
                 current_price = data.get('current_price', 0)
                 price_change = data.get('price_change_pct', 0) / 100
-                
+
+                # 获取成本基础（总投入金额）
+                total_cost = positions_data.get(symbol, 0)
+
                 # 格式化日期 (从 YYYY-MM-DD 转换为 Sep 5 格式)
                 if entry_date and entry_date != '未知':
                     try:
@@ -657,19 +690,20 @@ def _print_enhanced_analysis_chinese(analysis: dict):
                         formatted_date = entry_date
                 else:
                     formatted_date = '未知'
-                
+
                 # 确定趋势符号和颜色
                 trend_symbol = "🟢" if price_change >= 0 else "🔴"
                 price_change_sign = "+" if price_change >= 0 else ""
-                
+
                 entry_price_display = f"${first_price:11,.2f}"
-                
+                cost_basis_display = f"${total_cost:11,.0f}"
+
                 padded_date = pad_to_width(formatted_date, 13)
                 current_price_str = f"${current_price:11,.2f}"
                 padded_current = pad_to_width(current_price_str, 12)
                 price_change_str = f"{trend_symbol}  {price_change_sign}{price_change:.2%}"
                 padded_change = pad_to_width(price_change_str, 12)
-                print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:12s} | {padded_current} | {padded_change} |")
+                print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:12s} | {cost_basis_display:12s} | {padded_current} | {padded_change} |")
 
     # 投资策略洞察
     if 'strategy_insights' in analysis:
