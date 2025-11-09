@@ -34,3 +34,8 @@ PFE, buy, 10/13/2025, 24.83, 200, schwab, n
 SPY, buy, 10/14/2025, 657.29, 9, schwab, n
 VGT, buy, 10/23/2025, 750.11, 40, schwab, n
 DECK, buy, 10/24/2025, 88, 55, schwab, n
+OC, buy, 10/27/2025, 127, 40, schwab, n
+VALE, buy, 10/31/2025, 11.979, 835, schwab, n
+CLX, buy, 10/31/2025, 112.25, 45, schwab, n
+TROW, buy, 10/31/2025, 103.9489, 50, schwab, n
+KMB, buy, 11/03/2025, 103.5, 50, schwab, n

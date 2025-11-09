@@ -392,10 +392,10 @@ class PortfolioService:
         for pos in positions:
             symbol = pos['symbol']
             category_info = self._get_company_info(symbol)
-            
+
             pos_with_category = pos.copy()
             pos_with_category.update(category_info)
-            
+
             if category_info['type'] == 'ETF':
                 etf_positions.append(pos_with_category)
                 etf_total_cost += pos['total_cost']
@@ -406,7 +406,16 @@ class PortfolioService:
                 stock_total_cost += pos['total_cost']
                 if pos['market_value']:
                     stock_total_value += pos['market_value']
-        
+
+        # 按总盈亏从大到小排序（需要处理None值）
+        def get_pnl(pos):
+            if pos.get('unrealized_pnl') is not None:
+                return pos['unrealized_pnl']
+            return float('-inf')  # 无盈亏数据的排在最后
+
+        etf_positions.sort(key=get_pnl, reverse=True)
+        stock_positions.sort(key=get_pnl, reverse=True)
+
         return {
             'etf_analysis': {
                 'positions': etf_positions,
