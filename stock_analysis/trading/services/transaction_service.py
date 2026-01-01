@@ -34,26 +34,27 @@ class TransactionService:
         # 使用批次级别服务作为底层实现，并传递配置
         self.lot_service = LotTransactionService(storage, config)
     
-    def record_buy_transaction(self, symbol: str, quantity: Decimal, 
-                             price: Decimal, transaction_date: str, 
-                             external_id: str = None, notes: str = None) -> Transaction:
+    def record_buy_transaction(self, symbol: str, quantity: Decimal,
+                             price: Decimal, transaction_date: str,
+                             platform: str = None, external_id: str = None, notes: str = None) -> Transaction:
         """
         记录买入交易
-        
+
         Args:
             symbol: 股票代码
             quantity: 买入数量
             price: 买入价格
             transaction_date: 交易日期（YYYY-MM-DD格式）
+            platform: 交易平台 (ml, schwab等)
             external_id: 外部业务ID，用于去重
             notes: 备注
-            
+
         Returns:
             Transaction: 创建的交易记录
         """
         # 委托给批次级别服务处理，确保创建批次记录
         return self.lot_service.record_buy_transaction(
-            symbol, quantity, price, transaction_date, external_id, notes
+            symbol, quantity, price, transaction_date, platform, external_id, notes
         )
     
     def record_sell_transaction(self, symbol: str, quantity: Decimal,
@@ -106,15 +107,15 @@ class TransactionService:
     def get_current_positions(self) -> List[Position]:
         """
         获取用户当前持仓（基于批次汇总）
-        
+
         Args:
-            
+
         Returns:
             List[Position]: 持仓列表
         """
         # 从批次级别服务获取持仓汇总，然后转换为Position对象
         position_summaries = self.lot_service.get_position_summary()
-        
+
         positions = []
         for summary in position_summaries:
             if summary.is_active:
@@ -128,7 +129,36 @@ class TransactionService:
                     is_active=True
                 )
                 positions.append(position)
-        
+
+        return positions
+
+    def get_positions_as_of_date(self, as_of_date: str) -> List[Position]:
+        """
+        获取截止到指定日期的用户持仓（基于批次汇总）
+
+        Args:
+            as_of_date: 截止日期（YYYY-MM-DD格式）
+
+        Returns:
+            List[Position]: 持仓列表
+        """
+        # 从批次级别服务获取截止日期的持仓汇总
+        position_summaries = self.lot_service.get_position_summary_as_of_date(as_of_date)
+
+        positions = []
+        for summary in position_summaries:
+            if summary.is_active:
+                position = Position(
+                    symbol=summary.symbol,
+                    quantity=Decimal(str(summary.total_quantity)),
+                    avg_cost=Decimal(str(summary.avg_cost)),
+                    total_cost=Decimal(str(summary.total_cost)),
+                    first_buy_date=summary.first_buy_date,
+                    last_transaction_date=summary.last_transaction_date,
+                    is_active=True
+                )
+                positions.append(position)
+
         return positions
     
     def get_current_position(self, symbol: str) -> Optional[Position]:

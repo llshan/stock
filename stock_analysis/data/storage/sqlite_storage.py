@@ -880,31 +880,38 @@ class SQLiteStorage(BaseStorage):
         self.cursor.execute(sql, params)
         self._maybe_commit()
 
-    def get_position_lots(self, symbol: str = None, 
+    def get_position_lots(self, symbol: str = None,
                          active_only: bool = True) -> List[Dict[str, Any]]:
-        """获取持仓批次"""
+        """获取持仓批次（包含关联交易的notes信息用于识别DRIP）"""
         self._check_connection("get_position_lots")
-        
+
         T = self.config.Tables.POSITION_LOTS
         F = self.config.Fields
-        
+
         conditions = []
         params = []
-        
+
         if symbol:
-            conditions.append(f"{F.SYMBOL} = ?")
+            conditions.append(f"pl.{F.SYMBOL} = ?")
             params.append(symbol)
-        
+
         if active_only:
-            conditions.append(f"{F.PositionLots.IS_CLOSED} = 0")
-        
-        where_clause = " AND ".join(conditions)
-        sql = f"SELECT * FROM {T} WHERE {where_clause} " \
-              f"ORDER BY {F.SYMBOL}, {F.PositionLots.PURCHASE_DATE}, {F.PositionLots.ID}"
-        
+            conditions.append(f"pl.{F.PositionLots.IS_CLOSED} = 0")
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        # JOIN transactions表获取notes字段，用于识别DRIP交易
+        sql = f"""
+            SELECT pl.*, t.notes
+            FROM {T} pl
+            LEFT JOIN transactions t ON pl.transaction_id = t.id
+            WHERE {where_clause}
+            ORDER BY pl.{F.SYMBOL}, pl.{F.PositionLots.PURCHASE_DATE}, pl.{F.PositionLots.ID}
+        """
+
         self.cursor.execute(sql, params)
         rows = self.cursor.fetchall()
-        
+
         columns = [description[0] for description in self.cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 

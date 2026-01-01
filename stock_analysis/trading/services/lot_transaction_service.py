@@ -342,11 +342,11 @@ class LotTransactionService:
         else:
             return 1  # 默认为Merrill Edge
     
-    def get_position_lots(self, symbol: str = None, 
+    def get_position_lots(self, symbol: str = None,
                          active_only: bool = True) -> List[PositionLot]:
         """获取用户的持仓批次"""
         lots_data = self.storage.get_position_lots(symbol, active_only=True)
-        
+
         lots = []
         for lot_data in lots_data:
             lot = PositionLot(
@@ -359,10 +359,11 @@ class LotTransactionService:
                 purchase_date=lot_data['purchase_date'],
                 is_closed=bool(lot_data['is_closed']),
                 created_at=datetime.fromisoformat(lot_data.get('created_at', '')) if lot_data.get('created_at') else None,
-                updated_at=datetime.fromisoformat(lot_data.get('updated_at', '')) if lot_data.get('updated_at') else None
+                updated_at=datetime.fromisoformat(lot_data.get('updated_at', '')) if lot_data.get('updated_at') else None,
+                notes=lot_data.get('notes')  # 添加notes字段用于识别DRIP交易
             )
             lots.append(lot)
-        
+
         return lots
     
     def get_position_summary(self, symbol: str = None) -> List[PositionSummary]:
@@ -382,6 +383,102 @@ class LotTransactionService:
             if summary.is_active:  # 只返回有持仓的汇总
                 summaries.append(summary)
         
+        return summaries
+
+    def get_position_lots_as_of_date(self, as_of_date: str, symbol: str = None) -> List[PositionLot]:
+        """
+        获取截止到指定日期的持仓批次
+
+        Args:
+            as_of_date: 截止日期（YYYY-MM-DD格式）
+            symbol: 股票代码（可选）
+
+        Returns:
+            List[PositionLot]: 持仓批次列表，每个批次的remaining_quantity已调整为截止日期时的值
+        """
+        # 1. 获取所有在as_of_date或之前购买的批次
+        query = """
+            SELECT pl.*, t.notes
+            FROM position_lots pl
+            LEFT JOIN transactions t ON pl.transaction_id = t.id
+            WHERE pl.purchase_date <= ?
+        """
+        params = [as_of_date]
+
+        if symbol:
+            query += " AND pl.symbol = ?"
+            params.append(symbol)
+
+        query += " ORDER BY pl.symbol, pl.purchase_date, pl.id"
+
+        rows = self.storage.cursor.execute(query, params).fetchall()
+        columns = [desc[0] for desc in self.storage.cursor.description]
+        lots_data = [dict(zip(columns, row)) for row in rows]
+
+        # 2. 对每个批次，计算截止到as_of_date时已卖出的数量
+        adjusted_lots = []
+        for lot_data in lots_data:
+            lot_id = lot_data['id']
+
+            # 查询该批次在as_of_date或之前的卖出记录
+            sold_query = """
+                SELECT SUM(sa.quantity_sold) as total_sold
+                FROM sale_allocations sa
+                JOIN transactions t ON sa.sale_transaction_id = t.id
+                WHERE sa.lot_id = ? AND t.transaction_date <= ?
+            """
+            sold_result = self.storage.cursor.execute(sold_query, (lot_id, as_of_date)).fetchone()
+            total_sold = Decimal(str(sold_result[0])) if sold_result and sold_result[0] else Decimal('0')
+
+            # 计算截止日期时的剩余数量
+            original_quantity = Decimal(str(lot_data['original_quantity']))
+            remaining_as_of_date = original_quantity - total_sold
+
+            # 只包含在截止日期时还有剩余的批次
+            if remaining_as_of_date > Decimal('0.0001'):
+                lot = PositionLot(
+                    id=lot_data['id'],
+                    symbol=lot_data['symbol'],
+                    transaction_id=lot_data['transaction_id'],
+                    original_quantity=original_quantity,
+                    remaining_quantity=remaining_as_of_date,  # 使用调整后的剩余数量
+                    cost_basis=Decimal(str(lot_data['cost_basis'])),
+                    purchase_date=lot_data['purchase_date'],
+                    is_closed=False,  # 截止该日期时还是开放的
+                    created_at=datetime.fromisoformat(lot_data.get('created_at', '')) if lot_data.get('created_at') else None,
+                    updated_at=datetime.fromisoformat(lot_data.get('updated_at', '')) if lot_data.get('updated_at') else None,
+                    notes=lot_data.get('notes')
+                )
+                adjusted_lots.append(lot)
+
+        return adjusted_lots
+
+    def get_position_summary_as_of_date(self, as_of_date: str, symbol: str = None) -> List[PositionSummary]:
+        """
+        获取截止到指定日期的持仓汇总
+
+        Args:
+            as_of_date: 截止日期（YYYY-MM-DD格式）
+            symbol: 股票代码（可选）
+
+        Returns:
+            List[PositionSummary]: 持仓汇总列表
+        """
+        lots = self.get_position_lots_as_of_date(as_of_date, symbol)
+
+        # 按股票代码分组
+        symbol_lots = {}
+        for lot in lots:
+            if lot.symbol not in symbol_lots:
+                symbol_lots[lot.symbol] = []
+            symbol_lots[lot.symbol].append(lot)
+
+        summaries = []
+        for sym, symbol_lot_list in symbol_lots.items():
+            summary = PositionSummary.from_lots(sym, symbol_lot_list)
+            if summary.is_active:  # 只返回有持仓的汇总
+                summaries.append(summary)
+
         return summaries
 
     def get_sale_allocations_by_transaction(self, transaction_id: int) -> List[Any]:

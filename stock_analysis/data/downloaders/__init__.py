@@ -5,6 +5,5 @@
 
 from .base import BaseDownloader
 from .stooq import StooqDataDownloader
-from .finnhub import FinnhubDownloader
 
-__all__ = ['BaseDownloader', 'StooqDataDownloader', 'FinnhubDownloader']
+__all__ = ['BaseDownloader', 'StooqDataDownloader']

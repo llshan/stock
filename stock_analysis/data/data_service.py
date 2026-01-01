@@ -7,9 +7,9 @@
 - 封装增量下载、批量下载与数据质量评估流程
 
 说明：
-- 混合下载策略：
-  * 股票价格数据：批量下载用Stooq，增量更新用Finnhub
-  * 财务数据：全部使用Finnhub
+- 下载策略：
+  * 股票价格数据：使用Stooq下载
+  * 财务数据：不再支持（Finnhub已移除）
 - 模块侧重于数据流转（下载→规范化→存储）
 - 依赖 storage 与 downloaders 子模块
 """
@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from .config import DataServiceConfig
 from .downloaders.stooq import StooqDataDownloader
-from .downloaders.finnhub import FinnhubDownloader
 from .downloaders.base import DownloaderError
 from .models import (
     FinancialData,
@@ -50,9 +49,8 @@ class DataService:
         """
         self.storage: BaseStorage = storage or create_storage('sqlite')
         self.config = config or DataServiceConfig()
-        # 价格数据：批量用Stooq，增量用Finnhub
+        # 价格数据：使用Stooq
         self.stooq_downloader = StooqDataDownloader()
-        self.finnhub_downloader = FinnhubDownloader()
 
         self.logger = logging.getLogger(__name__)
 
@@ -60,7 +58,7 @@ class DataService:
         self, symbol: str, start_date: Optional[str] = None
     ) -> DownloadResult:
         """
-        下载并存储股票数据（批量用Stooq，增量用Finnhub）
+        下载并存储股票数据（使用Stooq）
 
         Args:
             symbol: 股票代码
@@ -99,32 +97,9 @@ class DataService:
                 else (start_date or '2000-01-01')
             )
 
-            # 策略选择
-            if raw_last is None:
-                used = 'Stooq批量历史数据'
-                try:
-                    stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
-                except DownloaderError as e:
-                    self.logger.warning(f"Stooq批量下载失败，尝试Finnhub: {e}")
-                    used = 'Finnhub批量下载(Stooq回退)'
-                    stock = self.finnhub_downloader.download_stock_data(symbol, actual_start)
-            else:
-                days_since_last = (datetime.now() - datetime.strptime(raw_last, '%Y-%m-%d')).days
-                threshold_days = getattr(self.config.downloader, 'stock_incremental_threshold_days', 100)
-                if days_since_last <= threshold_days:
-                    used = 'Finnhub增量更新'
-                    try:
-                        stock = self.finnhub_downloader.download_stock_data(symbol, actual_start)
-                    except DownloaderError as e:
-                        self.logger.warning(f"Finnhub增量更新失败，回退到Stooq批量下载: {e}")
-                        used = 'Stooq批量下载(Finnhub回退)'
-                        stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
-                else:
-                    used = f'Stooq批量重下载(超过{threshold_days}天阈值)'
-                    self.logger.info(
-                        f"{symbol} 最后更新距今 {days_since_last} 天，超过 {threshold_days} 天阈值，使用批量下载"
-                    )
-                    stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
+            # 使用Stooq下载
+            used = 'Stooq'
+            stock = self.stooq_downloader.download_stock_data(symbol, actual_start)
 
             # 入库
             self.storage.store_stock_data(symbol, stock)
@@ -144,7 +119,7 @@ class DataService:
                 data_type='stock',
                 data_points=0,
                 error_message=str(e),
-                used_strategy=locals().get('used'),
+                used_strategy='Stooq',
             )
         except Exception as e:
             error_msg = f"下载并存储 {symbol} 数据失败: {str(e)}"
@@ -153,73 +128,19 @@ class DataService:
 
     def download_and_store_financial_data(self, symbol: str) -> DownloadResult:
         """
-        下载并存储财务数据（带刷新阈值）。
+        下载并存储财务数据（已不再支持）。
 
-        - 如果最近财报期间距今不超过阈值（默认 90 天），则跳过并返回 no_new_data。
-        - 否则使用 Finnhub 下载财报并入库。
+        财务数据下载功能已移除（Finnhub API不再可用）。
+        此方法保留是为了向后兼容性，但总是返回失败结果。
         """
-        try:
-            # 判定是否需要刷新
-            try:
-                last_period = self.storage.get_last_financial_period(symbol)
-            except Exception:
-                last_period = None
-
-            need_refresh = True
-            if last_period:
-                try:
-                    days = (datetime.now() - datetime.strptime(last_period, '%Y-%m-%d')).days
-                    threshold = getattr(self.config.downloader, 'financial_refresh_days', 90)
-                    need_refresh = days > threshold
-                except Exception:
-                    need_refresh = True
-
-            if not need_refresh:
-                return DownloadResult(
-                    success=True,
-                    symbol=symbol,
-                    data_type='financial',
-                    data_points=0,
-                    used_strategy='skip_recent_financial',
-                    metadata={'no_new_data': True},
-                )
-
-            downloader = self.finnhub_downloader
-            downloader_name = 'finnhub'
-            
-            fin = downloader.download_financial_data(symbol, use_retry=True)
-            stmt_count = len(fin.financial_statements)
-            if stmt_count == 0:
-                return DownloadResult(
-                    success=False,
-                    symbol=symbol,
-                    data_type='financial',
-                    data_points=0,
-                    error_message='未获取到财务报表（返回为空）',
-                    used_strategy=f'{downloader_name}_financial_empty',
-                )
-            self.storage.store_financial_data(symbol, fin)
-            return DownloadResult(
-                success=True,
-                symbol=symbol,
-                data_type='financial',
-                data_points=stmt_count,
-                used_strategy=f'{downloader_name}_financial',
-            )
-
-        except DownloaderError as e:
-            return DownloadResult(
-                success=False,
-                symbol=symbol,
-                data_type='financial',
-                data_points=0,
-                error_message=str(e),
-                used_strategy=f'{downloader_name}_financial_error',
-            )
-        except Exception as e:
-            error_msg = f"下载并存储 {symbol} 财务数据失败: {str(e)}"
-            self.logger.error(error_msg)
-            return DownloadResult(success=False, symbol=symbol, data_type='financial', error_message=error_msg)
+        return DownloadResult(
+            success=False,
+            symbol=symbol,
+            data_type='financial',
+            data_points=0,
+            error_message='财务数据下载功能已移除（Finnhub API不再可用）',
+            used_strategy='not_supported',
+        )
 
     def batch_download_and_store(
         self,
@@ -382,16 +303,10 @@ class DataService:
             'MATX': {'name': 'Matson, Inc.', 'sector': '工业', 'industry': '海运运输'},
             'OGN': {'name': 'Organon & Co.', 'sector': '医疗保健', 'industry': '制药'},
             'OMC': {'name': 'Omnicom Group Inc.', 'sector': '传播服务', 'industry': '广告营销'},
+            'FHI': {'name': 'Federated Hermes, Inc.', 'sector': '金融服务', 'industry': '资产管理'},
         }
 
-        # 尝试从API获取（如果可用）
-        try:
-            financial_data = self.finnhub_downloader.download_financial_data(symbol)
-            if isinstance(financial_data, FinancialData) and financial_data.basic_info:
-                return financial_data.basic_info
-        except Exception:
-            # API不可用，使用回退信息
-            pass
+        # Finnhub API已移除，直接使用回退信息
 
         # 使用已知信息或默认信息
         if symbol in known_stocks:

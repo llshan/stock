@@ -42,11 +42,17 @@ class PositionSummary:
                 lot_count=0,
                 closed_lot_count=0
             )
-        
+
         # 计算汇总数据
         active_lots = [lot for lot in lots if not lot.is_closed]
         total_quantity = sum(lot.remaining_quantity for lot in active_lots)
-        total_cost = sum(lot.total_cost for lot in active_lots)
+
+        # 计算总成本时排除DRIP交易（分红再投资不算新投入资金）
+        # DRIP批次的notes字段包含"Dividend Reinvestment"
+        total_cost = sum(
+            lot.total_cost for lot in active_lots
+            if not (hasattr(lot, 'notes') and lot.notes and 'Dividend Reinvestment' in lot.notes)
+        )
         avg_cost = total_cost / total_quantity if total_quantity > 0 else 0.0
         
         # 日期信息

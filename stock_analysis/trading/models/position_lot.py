@@ -13,14 +13,14 @@ from decimal import Decimal
 class PositionLot:
     """
     持仓批次模型 - 每次买入创建一个独立批次
-    
+
     核心概念：
     - 每次买入都是独立批次，保持完整的成本基础追踪
     - original_quantity: 原始买入数量（不变）
     - remaining_quantity: 剩余数量（随卖出减少）
     - cost_basis: 每股成本基础
     """
-    
+
     symbol: str                        # 股票代码
     transaction_id: int                # 关联的买入交易ID
     original_quantity: Decimal         # 原始买入数量
@@ -31,6 +31,7 @@ class PositionLot:
     is_closed: bool = False           # 是否已完全卖出
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    notes: Optional[str] = None       # 交易备注（用于识别DRIP等特殊交易）
     
     @property
     def total_cost(self) -> Decimal:

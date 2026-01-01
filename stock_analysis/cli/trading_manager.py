@@ -101,13 +101,14 @@ def cmd_buy(args: argparse.Namespace) -> int:
     storage = _storage_from_args(args)
     config = DEFAULT_TRADING_CONFIG
     svc = TransactionService(storage, config)
-    
+
     try:
         transaction = svc.record_buy_transaction(
             symbol=args.symbol.upper(),
             quantity=args.quantity,
             price=args.price,
             transaction_date=args.date,
+            platform=args.notes,  # Use notes as platform for now
             external_id=args.external_id,
             notes=args.notes
         )
@@ -155,6 +156,7 @@ def cmd_sell(args: argparse.Namespace) -> int:
                 specific_lots = _parse_specific_lots(args.specific_lots)
             
             # 记录卖出交易
+            basis_method = getattr(args, 'basis', None) or 'FIFO'
             transaction = svc.record_sell_transaction(
                 symbol=args.symbol.upper(),
                 quantity=args.quantity,
@@ -162,14 +164,14 @@ def cmd_sell(args: argparse.Namespace) -> int:
                 transaction_date=args.date,
                     external_id=args.external_id,
                 notes=args.notes,
-                cost_basis_method=getattr(args, 'basis', 'FIFO').upper(),
+                cost_basis_method=basis_method.upper(),
                 specific_lots=specific_lots
             )
-            
+
             # 显示执行回显 - 批次匹配明细
             print(f"✅ 卖出交易记录成功: ID={transaction.id}")
             print(f"📊 交易明细: {args.symbol} {args.quantity}股 @ ${svc.config.format_price(args.price)}")
-            print(f"🔍 使用方法: {getattr(args, 'basis', 'FIFO').upper()}")
+            print(f"🔍 使用方法: {basis_method.upper()}")
             
             # 获取刚创建的分配记录以显示明细
             allocations = svc.get_sale_allocations(sale_transaction_id=transaction.id)
@@ -228,6 +230,173 @@ def cmd_positions(args: argparse.Namespace) -> int:
         )
     storage.close()
     return 0
+
+
+def cmd_dividend(args: argparse.Namespace) -> int:
+    """记录分红"""
+    setup_logging('INFO' if args.verbose else 'WARNING')
+    storage = _storage_from_args(args)
+
+    try:
+        dividend_type = args.type.upper()
+
+        if dividend_type == 'CASH':
+            # 现金分红
+            total_cash = args.amount * args.shares if args.shares else args.amount
+
+            storage.connection.execute("""
+                INSERT INTO dividends (
+                    symbol, dividend_date, dividend_type,
+                    cash_amount, shares_owned, total_cash_received,
+                    platform, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                args.symbol.upper(),
+                args.date,
+                'CASH',
+                args.amount,
+                args.shares,
+                total_cash,
+                getattr(args, 'platform', None),
+                getattr(args, 'notes', None)
+            ))
+            storage.connection.commit()
+
+            print(f"✅ 现金分红记录成功")
+            print(f"📊 {args.symbol} - 每股分红: ${args.amount:.4f}")
+            if args.shares:
+                print(f"📊 持有股数: {args.shares:.2f} 股")
+                print(f"💵 总收入: ${total_cash:.2f}")
+
+        elif dividend_type == 'STOCK':
+            # 股票分红 (DRIP)
+            # 首先创建一个买入交易
+            from stock_analysis.trading import TransactionService
+            config = DEFAULT_TRADING_CONFIG
+            svc = TransactionService(storage, config)
+
+            transaction = svc.record_buy_transaction(
+                symbol=args.symbol.upper(),
+                quantity=args.shares,
+                price=args.reinvest_price,
+                transaction_date=args.date,
+                external_id=f"DRIP_{args.symbol}_{args.date}",
+                notes=f"Dividend Reinvestment - {getattr(args, 'notes', '')}"
+            )
+
+            # 记录分红信息
+            storage.connection.execute("""
+                INSERT INTO dividends (
+                    symbol, dividend_date, dividend_type,
+                    reinvest_shares, reinvest_price, reinvest_transaction_id,
+                    platform, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                args.symbol.upper(),
+                args.date,
+                'STOCK',
+                args.shares,
+                args.reinvest_price,
+                transaction.id,
+                getattr(args, 'platform', None),
+                getattr(args, 'notes', None)
+            ))
+            storage.connection.commit()
+
+            print(f"✅ 股票分红记录成功 (DRIP)")
+            print(f"📊 {args.symbol} - 再投资股数: {args.shares:.4f} 股")
+            print(f"💰 再投资价格: ${args.reinvest_price:.2f}")
+            print(f"📝 关联交易ID: {transaction.id}")
+
+        storage.close()
+        return 0
+
+    except Exception as e:
+        print(f"❌ 记录分红失败: {e}")
+        storage.close()
+        return 3
+
+
+def cmd_dividends(args: argparse.Namespace) -> int:
+    """查看分红记录"""
+    setup_logging('INFO' if args.verbose else 'WARNING')
+    storage = _storage_from_args(args)
+
+    try:
+        query = """
+            SELECT
+                d.symbol,
+                d.dividend_date,
+                d.dividend_type,
+                d.cash_amount,
+                d.shares_owned,
+                d.total_cash_received,
+                d.reinvest_shares,
+                d.reinvest_price,
+                d.platform,
+                d.notes
+            FROM dividends d
+        """
+
+        params = []
+        if hasattr(args, 'symbol') and args.symbol:
+            query += " WHERE d.symbol = ?"
+            params.append(args.symbol.upper())
+
+        query += " ORDER BY d.dividend_date DESC"
+
+        result = storage.connection.execute(query, params).fetchall()
+
+        if not result:
+            print("(暂无分红记录)")
+            storage.close()
+            return 0
+
+        print(f"\n📊 分红记录汇总\n")
+        print("=" * 100)
+
+        total_cash = 0.0
+        total_drip_shares = 0.0
+
+        for row in result:
+            symbol, div_date, div_type, cash_amt, shares_owned, total_cash_rcv, reinvest_shares, reinvest_price, platform, notes = row
+
+            print(f"\n股票: {symbol}")
+            print(f"日期: {div_date}")
+            print(f"类型: {'💵 现金分红' if div_type == 'CASH' else '📈 股票再投资(DRIP)'}")
+
+            if div_type == 'CASH':
+                print(f"每股分红: ${cash_amt:.4f}")
+                if shares_owned:
+                    print(f"持有股数: {shares_owned:.2f} 股")
+                    print(f"总收入: ${total_cash_rcv:.2f}")
+                    total_cash += total_cash_rcv
+            else:  # STOCK
+                print(f"再投资股数: {reinvest_shares:.4f} 股")
+                print(f"再投资价格: ${reinvest_price:.2f}")
+                print(f"再投资价值: ${reinvest_shares * reinvest_price:.2f}")
+                total_drip_shares += reinvest_shares
+
+            if platform:
+                print(f"平台: {platform}")
+            if notes:
+                print(f"备注: {notes}")
+
+            print("-" * 100)
+
+        print(f"\n💰 汇总:")
+        print(f"  总现金分红收入: ${total_cash:.2f}")
+        if total_drip_shares > 0:
+            print(f"  总DRIP再投资股数: {total_drip_shares:.4f} 股")
+        print("=" * 100)
+
+        storage.close()
+        return 0
+
+    except Exception as e:
+        print(f"❌ 查询分红记录失败: {e}")
+        storage.close()
+        return 3
 
 
 def _price_source_from_args(ps: Optional[str]) -> str:
@@ -326,19 +495,125 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
     return 0
 
 
+def _update_daily_pnl(storage, portfolio):
+    """更新每日盈亏数据到最新日期"""
+    from datetime import datetime, timedelta
+    from stock_analysis.data.data_service import DataService
+
+    # 获取最后计算的日期
+    query = """
+    SELECT MAX(valuation_date) as last_date
+    FROM daily_portfolio_pnl
+    """
+    result = storage.connection.execute(query).fetchone()
+
+    if result and result[0]:
+        last_date_str = result[0]
+        last_date = datetime.strptime(last_date_str, '%Y-%m-%d')
+        start_date = last_date + timedelta(days=1)
+    else:
+        # 如果表是空的，从第一笔交易开始
+        query = """
+        SELECT MIN(transaction_date) as first_date
+        FROM transactions
+        WHERE transaction_type = 'BUY'
+        """
+        result = storage.connection.execute(query).fetchone()
+        if result and result[0]:
+            start_date = datetime.strptime(result[0], '%Y-%m-%d')
+        else:
+            return  # 没有交易数据
+
+    today = datetime.now()
+
+    # 如果已经是最新的，不需要更新
+    if start_date > today:
+        return
+
+    print(f"🔄 更新每日盈亏数据: {start_date.strftime('%Y-%m-%d')} 至今...")
+
+    data_service = DataService(storage)
+    current_date = start_date
+    count = 0
+
+    while current_date <= today:
+        date_str = current_date.strftime('%Y-%m-%d')
+
+        try:
+            # 使用基础的portfolio summary，不调用AI分析
+            summary = portfolio.get_portfolio_summary(date_str)
+
+            # 检查是否有市场数据（周末或节假日可能没有数据）
+            if summary['total_market_value'] > 0:
+                # 获取已实现盈亏
+                realized_gains = portfolio.get_realized_gains()
+                realized_summary = realized_gains.get('summary', {})
+
+                # 获取现金分红
+                cash_dividends_query = """
+                    SELECT SUM(total_cash_received) as total_cash
+                    FROM dividends
+                    WHERE dividend_type = 'CASH'
+                """
+                cash_result = storage.connection.execute(cash_dividends_query).fetchone()
+                cash_dividends = float(cash_result[0]) if cash_result and cash_result[0] else 0.0
+
+                total_cost = summary['total_cost']
+                unrealized_pnl = summary['total_unrealized_pnl']
+                realized_pnl = realized_summary.get('total_realized_pnl', 0.0)
+                total_pnl = unrealized_pnl + realized_pnl + cash_dividends
+
+                # 计算盈亏比例
+                pnl_ratio = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+
+                # 插入或更新数据
+                insert_query = """
+                INSERT OR REPLACE INTO daily_portfolio_pnl
+                (valuation_date, total_cost, total_market_value, unrealized_pnl,
+                 realized_pnl, cash_dividends, total_pnl, pnl_ratio, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """
+
+                storage.connection.execute(insert_query, (
+                    date_str,
+                    total_cost,
+                    summary['total_market_value'],
+                    unrealized_pnl,
+                    realized_pnl,
+                    cash_dividends,
+                    total_pnl,
+                    pnl_ratio
+                ))
+                count += 1
+        except Exception as e:
+            # 记录第一个错误以便调试
+            if count == 0:
+                print(f"⚠️  首次计算时遇到错误 ({date_str}): {str(e)}")
+            pass
+
+        current_date += timedelta(days=1)
+
+    if count > 0:
+        storage.connection.commit()
+        print(f"✅ 已更新 {count} 天的数据")
+
+
 def cmd_enhanced_portfolio(args: argparse.Namespace) -> int:
     """增强版投资组合分析"""
     setup_logging('INFO' if args.verbose else 'WARNING')
     storage = _storage_from_args(args)
     config = DEFAULT_TRADING_CONFIG
     portfolio = PortfolioService(storage, config)
-    
+
+    # 自动更新每日盈亏数据
+    _update_daily_pnl(storage, portfolio)
+
     # 获取增强分析
     analysis = portfolio.get_enhanced_portfolio_analysis(args.as_of_date)
-    
+
     # 打印中文格式的分析报告
-    _print_enhanced_analysis_chinese(analysis)
-    
+    _print_enhanced_analysis_chinese(analysis, storage)
+
     storage.close()
     return 0
 
@@ -359,7 +634,128 @@ def pad_to_width(text, target_width):
     padding = target_width - current_width
     return text + ' ' * max(0, padding)
 
-def _print_enhanced_analysis_chinese(analysis: dict):
+def _print_pnl_chart(storage):
+    """在终端打印ASCII盈亏图表"""
+    try:
+        # 获取最近180天的数据
+        query = """
+        SELECT valuation_date, pnl_ratio, total_pnl
+        FROM daily_portfolio_pnl
+        ORDER BY valuation_date DESC
+        LIMIT 180
+        """
+        rows = storage.connection.execute(query).fetchall()
+
+        if not rows:
+            return
+
+        # 反转顺序（从旧到新）
+        rows = list(reversed(rows))
+
+        # 每隔3天采样一个点
+        sampled_rows = [rows[i] for i in range(0, len(rows), 3)]
+
+        dates = [row[0] for row in sampled_rows]
+        ratios = [row[1] for row in sampled_rows]
+        pnls = [row[2] for row in sampled_rows]
+
+        # 打印图表标题
+        print("\n📈 近180天盈亏比例趋势（每3天采样）")
+        print("=" * 80)
+
+        # 计算图表参数
+        max_ratio = max(ratios)
+        min_ratio = min(ratios)
+        ratio_range = max_ratio - min_ratio
+
+        # 图表高度
+        chart_height = 15
+        chart_width = len(ratios)
+
+        # 归一化比例到图表高度
+        def normalize(ratio):
+            if ratio_range == 0:
+                return chart_height // 2
+            normalized = (ratio - min_ratio) / ratio_range
+            return int(normalized * (chart_height - 1))
+
+        # 计算零线位置
+        if min_ratio <= 0 <= max_ratio:
+            zero_line = normalize(0)
+        else:
+            zero_line = -1
+
+        # 绘制图表（从上到下）
+        for h in range(chart_height - 1, -1, -1):
+            line = ""
+
+            # Y轴刻度
+            if h == chart_height - 1:
+                line += f"{max_ratio:>5.1f}% │"
+            elif h == 0:
+                line += f"{min_ratio:>5.1f}% │"
+            elif h == zero_line:
+                line += " 0.0%  ┼"
+            else:
+                line += "       │"
+
+            # 绘制数据点
+            for i, ratio in enumerate(ratios):
+                point_height = normalize(ratio)
+
+                if h == zero_line:
+                    if point_height == h:
+                        line += "●─"
+                    else:
+                        line += "──"
+                elif point_height == h:
+                    if ratio >= 0:
+                        line += "● "
+                    else:
+                        line += "● "
+                elif point_height > h:
+                    if ratio >= 0:
+                        line += "│ "
+                    else:
+                        line += "│ "
+                else:
+                    line += "  "
+
+            print(line)
+
+        # X轴
+        print("       └" + "─" * (chart_width * 2))
+
+        # 日期标签（只显示部分）
+        date_line = ""
+        step = max(1, len(dates) // 6)
+        for i in range(0, len(dates), step):
+            date_str = dates[i][-5:]  # 只显示MM-DD
+            current_pos = len(date_line)
+            target_pos = 8 + i * 2  # 8是起始位置（与Y轴对齐），i*2是数据点位置
+            padding_needed = target_pos - current_pos
+            if padding_needed > 0:
+                date_line += " " * padding_needed + date_str
+            elif i == 0:
+                # 第一个日期特殊处理
+                date_line = " " * 8 + date_str
+        print(date_line)
+
+        # 统计信息
+        print()
+        print(f"📊 统计:")
+        print(f"  当前盈亏: {ratios[-1]:>6.2f}% (${pnls[-1]:>10,.2f})")
+        print(f"  最高盈亏: {max_ratio:>6.2f}%")
+        print(f"  最低盈亏: {min_ratio:>6.2f}%")
+        print(f"  波动范围: {ratio_range:>6.2f}%")
+        print()
+
+    except Exception as e:
+        # 如果出错，静默跳过
+        pass
+
+
+def _print_enhanced_analysis_chinese(analysis: dict, storage=None):
     """打印中文格式的增强投资组合分析"""
     basic = analysis['basic_summary']
     
@@ -371,6 +767,10 @@ def _print_enhanced_analysis_chinese(analysis: dict):
     budget_total = 1000000  # 100万预算
     remaining_cash = budget_total - basic['total_cost']
     
+    # 获取风险和表现数据
+    risk = analysis['risk_metrics']
+    perf = analysis['performance_analysis']
+
     print("\n📈 组合概览:")
     print(f"  投资预算:   ${budget_total:,.2f}")
     print(f"  已投资:     ${basic['total_cost']:,.2f}")
@@ -379,6 +779,25 @@ def _print_enhanced_analysis_chinese(analysis: dict):
     print(f"  总盈亏:     ${basic['total_unrealized_pnl']:,.2f}")
     print(f"  收益率:     {basic['total_unrealized_pnl_pct']:.2f}%")
     print(f"  持仓数量:   {basic['total_positions']} 只")
+
+    # 添加风险信息
+    if 'message' not in risk:
+        print(f"  最大持仓:   {risk['max_position']['symbol']} ({risk['max_position']['concentration']:.1%})")
+        print(f"  前三大占比: {risk['top3_concentration']:.1%}")
+        if 'sector_analysis' in risk:
+            sector_info = risk['sector_analysis']
+            print(f"  最大行业:   {sector_info['max_sector']} ({sector_info['max_sector_concentration']:.1%})")
+            print(f"  行业分布:   {sector_info['sector_count']}个")
+        risk_color = "🟢" if risk['risk_level'] == '低' else "🟡" if risk['risk_level'] == '中' else "🔴"
+        print(f"  风险等级:   {risk_color} {risk['risk_level']}")
+
+    # 添加表现信息
+    if 'message' not in perf:
+        print(f"  盈利股票:   {perf['winners']}只")
+        print(f"  亏损股票:   {perf['losers']}只")
+        print(f"  胜率:       {perf['winner_ratio']:.1%}")
+        print(f"  最佳:       {perf['best_performer']['symbol']} (+{perf['best_performer']['return_pct']:.2f}%)")
+        print(f"  最差:       {perf['worst_performer']['symbol']} ({perf['worst_performer']['return_pct']:+.2f}%)")
     
     # 专业格式的持仓分析表格
     print("\n🏢 按公司类型持仓分解")
@@ -595,55 +1014,9 @@ def _print_enhanced_analysis_chinese(analysis: dict):
 
         print("  |----------|---------------------|----------|---------|------------|------------|------------|------------|---------|---------|")
         subtotal_company = pad_to_width('', 19)
-        subtotal_sector = pad_to_width('', 8) 
+        subtotal_sector = pad_to_width('', 8)
         print(f"  |   总计   | {subtotal_company} | {subtotal_sector} | {stock_total_shares:7.0f} | ${stock_total_cost:9,.0f} | ${stock_total_value:9,.0f} | {stock_daily_pnl_str:>8s} | {stock_pnl_str:>7s} | {stock_return_str:>7s} | {stock_subtotal_weight_str:>7s} |")
-    
-    # 平台分析
-    print("\n🏦 平台分布:")
-    platform_analysis = analysis['platform_analysis']
-    for platform, data in platform_analysis.items():
-        if isinstance(data, dict) and 'total_investment' in data:
-            pnl_symbol = "📈" if data['pnl'] >= 0 else "📉"
-            print(f"  {platform}平台:")
-            print(f"    投资: ${data['total_investment']:,.2f}")
-            print(f"    市值: ${data['current_value']:,.2f}")
-            print(f"    盈亏: ${data['pnl']:,.2f} ({data['return_pct']:+.2f}%) {pnl_symbol}")
-            print(f"    股票: {', '.join(data['symbols'])}")
-    
-    # 风险分析与集中度
-    print("\n⚖️ 详细风险分析:")
-    risk = analysis['risk_metrics']
-    if 'message' not in risk:
-        print(f"  🎯 集中度分析:")
-        print(f"    最大持仓: {risk['max_position']['symbol']} ({risk['max_position']['concentration']:.1%})")
-        print(f"    前三大占比: {risk['top3_concentration']:.1%}")
-        print(f"    持仓数量: {risk['position_count']}只 (分散化程度: {risk['diversification_score']})")
-        
-        if 'sector_analysis' in risk:
-            sector_info = risk['sector_analysis']
-            print(f"    最大行业: {sector_info['max_sector']} ({sector_info['max_sector_concentration']:.1%})")
-            print(f"    行业分布: {sector_info['sector_count']}个行业")
-        
-        if 'volatility_analysis' in risk:
-            vol_info = risk['volatility_analysis']
-            print(f"    波动性评分: {vol_info['portfolio_volatility_score']:.2f} (风险级别: {vol_info['volatility_level']})")
-        
-        print(f"    综合风险等级: {risk['risk_level']}")
-        
-        # 风险评级颜色
-        risk_color = "🟢" if risk['risk_level'] == '低' else "🟡" if risk['risk_level'] == '中' else "🔴"
-        print(f"    风险状态: {risk_color} {risk['risk_level']}风险投资组合")
-    
-    # 表现分析
-    print("\n📊 表现分析:")
-    perf = analysis['performance_analysis']
-    if 'message' not in perf:
-        print(f"  盈利股票: {perf['winners']}只")
-        print(f"  亏损股票: {perf['losers']}只")
-        print(f"  胜率:     {perf['winner_ratio']:.1%}")
-        print(f"  最佳:     {perf['best_performer']['symbol']} (+{perf['best_performer']['return_pct']:.2f}%)")
-        print(f"  最差:     {perf['worst_performer']['symbol']} ({perf['worst_performer']['return_pct']:+.2f}%)")
-    
+
     # 股价表现专业表格
     if 'historical_performance' in analysis:
         hist_perf = analysis['historical_performance']
@@ -658,18 +1031,22 @@ def _print_enhanced_analysis_chinese(analysis: dict):
             entry_header = pad_to_width('入场价格', 12)
             cost_header = pad_to_width('成本基础', 12)
             current_header = pad_to_width('当前价格', 12)
+            market_value_header = pad_to_width('当前市值', 12)
             change_header = pad_to_width('价格变化', 12)
-            print(f"  | {stock_header} | {date_header} | {entry_header} | {cost_header} | {current_header} | {change_header} |")
-            print("  |-------|---------------|--------------|--------------|--------------|--------------|")
+            print(f"  | {stock_header} | {date_header} | {entry_header} | {cost_header} | {current_header} | {market_value_header} | {change_header} |")
+            print("  |-------|---------------|--------------|--------------|--------------|--------------|--------------|")
             
             # 按涨幅排序（从高到低）
             sorted_symbols = sorted(hist_perf.items(), key=lambda x: x[1].get('price_change_pct', 0), reverse=True)
 
-            # 获取持仓数据以便获取成本基础（总投入金额）
+            # 获取持仓数据以便获取成本基础（总投入金额）和当前市值
             positions_data = {}
             if 'basic_summary' in analysis and 'positions' in analysis['basic_summary']:
                 for pos in analysis['basic_summary']['positions']:
-                    positions_data[pos['symbol']] = pos.get('total_cost', 0)
+                    positions_data[pos['symbol']] = {
+                        'total_cost': pos.get('total_cost', 0),
+                        'current_value': pos.get('market_value', 0)
+                    }
 
             for symbol, data in sorted_symbols:
                 entry_date = data.get('entry_date', '未知')
@@ -677,8 +1054,10 @@ def _print_enhanced_analysis_chinese(analysis: dict):
                 current_price = data.get('current_price', 0)
                 price_change = data.get('price_change_pct', 0) / 100
 
-                # 获取成本基础（总投入金额）
-                total_cost = positions_data.get(symbol, 0)
+                # 获取成本基础（总投入金额）和当前市值
+                pos_data = positions_data.get(symbol, {})
+                total_cost = pos_data.get('total_cost', 0) if isinstance(pos_data, dict) else 0
+                current_value = pos_data.get('current_value', 0) if isinstance(pos_data, dict) else 0
 
                 # 格式化日期 (从 YYYY-MM-DD 转换为 Sep 5 格式)
                 if entry_date and entry_date != '未知':
@@ -697,38 +1076,158 @@ def _print_enhanced_analysis_chinese(analysis: dict):
 
                 entry_price_display = f"${first_price:11,.2f}"
                 cost_basis_display = f"${total_cost:11,.0f}"
+                market_value_display = f"${current_value:11,.0f}"
 
                 padded_date = pad_to_width(formatted_date, 13)
                 current_price_str = f"${current_price:11,.2f}"
                 padded_current = pad_to_width(current_price_str, 12)
+                padded_market_value = pad_to_width(market_value_display, 12)
                 price_change_str = f"{trend_symbol}  {price_change_sign}{price_change:.2%}"
                 padded_change = pad_to_width(price_change_str, 12)
-                print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:12s} | {cost_basis_display:12s} | {padded_current} | {padded_change} |")
+                print(f"  | {symbol:5s} | {padded_date} | {entry_price_display:12s} | {cost_basis_display:12s} | {padded_current} | {padded_market_value} | {padded_change} |")
 
-    # 投资策略洞察
-    if 'strategy_insights' in analysis:
-        insights = analysis['strategy_insights']
-        print(f"\n🎯 投资策略洞察:")
-        print(f"  投资组合评级: {insights.get('grade', 'N/A')} ({insights.get('overall_score', 0):.0f}分)")
-        print(f"  总体评价: {insights.get('summary', '无评价')}")
-        
-        print(f"\n  ✅ 投资组合优势:")
-        for strength in insights.get('strengths', []):
-            print(f"    • {strength}")
-        
-        print(f"\n  ⚠️  需要改进:")
-        for improvement in insights.get('improvements', []):
-            print(f"    • {improvement}")
-        
-        print(f"\n  📋 具体建议:")
-        for rec in insights.get('recommendations', []):
-            print(f"    • {rec}")
+    # 已实现盈亏分析
+    if 'realized_gains' in analysis and analysis['realized_gains']['sales']:
+        realized = analysis['realized_gains']
+        summary = realized['summary']
 
-    # 原有投资建议
-    print("\n💡 系统建议:")
-    for i, rec in enumerate(analysis['recommendations'], 1):
-        print(f"  {i}. {rec}")
-    
+        print(f"\n💰 已实现盈亏分析")
+        print()
+        print(f"  总卖出次数: {summary['total_sales']}笔")
+        print(f"  总成本: ${summary['total_cost_basis']:,.2f}")
+        print(f"  总收入: ${summary['total_proceeds']:,.2f}")
+        pnl_symbol = "📈" if summary['total_realized_pnl'] >= 0 else "📉"
+        pnl_sign = "+" if summary['total_realized_pnl'] >= 0 else ""
+        print(f"  已实现盈亏: ${pnl_sign}{summary['total_realized_pnl']:,.2f} ({pnl_sign}{summary['average_return_pct']:.2f}%) {pnl_symbol}")
+        print()
+
+        # 表头
+        symbol_header = pad_to_width('股票', 5)
+        company_header = pad_to_width('公司名称', 18)
+        sector_header = pad_to_width('行业', 8)
+        date_header = pad_to_width('卖出日期', 10)
+        qty_header = pad_to_width('数量', 8)
+        cost_header = pad_to_width('成本基础', 12)
+        proceeds_header = pad_to_width('卖出收入', 12)
+        pnl_header = pad_to_width('已实现盈亏', 12)
+        return_header = pad_to_width('收益率', 10)
+
+        print(f"  | {symbol_header} | {company_header} | {sector_header} | {date_header} | {qty_header} | {cost_header} | {proceeds_header} | {pnl_header} | {return_header} |")
+        print("  |-------|--------------------|----------|------------|----------|--------------|--------------|--------------|------------|")
+
+        # 按盈亏排序（从高到低）
+        sorted_sales = sorted(realized['sales'], key=lambda x: x.get('realized_pnl', 0), reverse=True)
+
+        for sale in sorted_sales:
+            symbol = sale['symbol']
+            company = sale['company_name'][:16] if len(sale['company_name']) > 16 else sale['company_name']
+            sector = sale['sector'][:6] if len(sale['sector']) > 6 else sale['sector']
+            sale_date = sale['sale_date']
+            quantity = sale['quantity_sold']
+            cost = sale['cost_basis']
+            proceeds = sale['sale_proceeds']
+            pnl = sale['realized_pnl']
+            pnl_pct = sale['realized_pnl_pct']
+
+            # 格式化
+            padded_company = pad_to_width(company, 18)
+            padded_sector = pad_to_width(sector, 8)
+            padded_date = pad_to_width(sale_date, 10)
+            qty_str = f"{quantity:8,.0f}"
+            cost_str = f"${cost:11,.2f}"
+            proceeds_str = f"${proceeds:11,.2f}"
+
+            # 盈亏显示
+            trend_symbol = "🟢" if pnl >= 0 else "🔴"
+            pnl_sign = "+" if pnl >= 0 else ""
+            pnl_str = f"${pnl_sign}{pnl:10,.2f}"
+            padded_pnl = pad_to_width(pnl_str, 12)
+
+            return_str = f"{trend_symbol} {pnl_sign}{pnl_pct:5.2f}%"
+            padded_return = pad_to_width(return_str, 10)
+
+            print(f"  | {symbol:5s} | {padded_company} | {padded_sector} | {padded_date} | {qty_str} | {cost_str:12s} | {proceeds_str:12s} | {padded_pnl} | {padded_return} |")
+        print()
+
+    # 总体投资表现（包含当前持仓和已卖出股票）
+    if 'overall_performance' in analysis:
+        overall = analysis['overall_performance']
+        breakdown = overall.get('breakdown', {})
+        current = breakdown.get('current_holdings', {})
+        realized = breakdown.get('realized_sales', {})
+
+        print(f"\n📊 总体投资表现")
+        print()
+        print(f"  ═══════════════════════════════════════════════════════════════════")
+        print(f"  📈 累计投资表现（包含当前持仓 + 已卖出股票）")
+        print(f"  ═══════════════════════════════════════════════════════════════════")
+        print()
+
+        # 总体数据
+        total_invested = overall.get('total_invested', 0.0)
+        total_current_value = overall.get('total_current_value', 0.0)
+        total_pnl = overall.get('total_pnl', 0.0)
+        total_return_pct = overall.get('total_return_pct', 0.0)
+
+        pnl_symbol = "📈" if total_pnl >= 0 else "📉"
+        pnl_sign = "+" if total_pnl >= 0 else ""
+
+        print(f"  💰 累计投入:     ${total_invested:>14,.2f}")
+        print(f"  💵 当前总价值:   ${total_current_value:>14,.2f}")
+        print(f"  {'🟢' if total_pnl >= 0 else '🔴'} 总盈亏:       ${pnl_sign}{total_pnl:>14,.2f}  ({pnl_sign}{total_return_pct:.2f}%) {pnl_symbol}")
+        print()
+
+        # 明细分解
+        print(f"  📋 盈亏明细:")
+        print()
+
+        # 当前持仓部分
+        current_cost = current.get('cost', 0.0)
+        current_mv = current.get('market_value', 0.0)
+        current_pnl = current.get('unrealized_pnl', 0.0)
+        current_pct = current.get('unrealized_pnl_pct', 0.0)
+
+        current_symbol = "🟢" if current_pnl >= 0 else "🔴"
+        current_sign = "+" if current_pnl >= 0 else ""
+
+        # 已卖出部分
+        realized_cost = realized.get('cost', 0.0)
+        realized_proceeds = realized.get('proceeds', 0.0)
+        realized_pnl = realized.get('realized_pnl', 0.0)
+        realized_pct = realized.get('realized_pnl_pct', 0.0)
+
+        realized_symbol = "🟢" if realized_pnl >= 0 else "🔴"
+        realized_sign = "+" if realized_pnl >= 0 else ""
+
+        # 计算占比：使用历史总投入（当前持仓 + 已卖出）
+        historical_total_invested = current_cost + realized_cost
+        current_weight = (current_cost / historical_total_invested * 100) if historical_total_invested > 0 else 0
+        realized_weight = (realized_cost / historical_total_invested * 100) if historical_total_invested > 0 else 0
+
+        # 现金分红
+        cash_div = overall.get('cash_dividends', 0.0)
+        cash_div_symbol = "🟢" if cash_div >= 0 else "🔴"
+        cash_div_sign = "+" if cash_div >= 0 else ""
+
+        print(f"  ┌─ 📂 当前持仓:")
+        print(f"  │   投入成本:    ${current_cost:>14,.2f}  (占历史总投入 {current_weight:.1f}%)")
+        print(f"  │   当前市值:    ${current_mv:>14,.2f}")
+        print(f"  │   未实现盈亏:  {current_symbol} ${current_sign}{current_pnl:>14,.2f}  ({current_sign}{current_pct:.2f}%)")
+        print(f"  │")
+        print(f"  ├─ 💸 已卖出股票:")
+        print(f"  │   投入成本:    ${realized_cost:>14,.2f}  (占历史总投入 {realized_weight:.1f}%)")
+        print(f"  │   卖出收入:    ${realized_proceeds:>14,.2f}")
+        print(f"  │   已实现盈亏:  {realized_symbol} ${realized_sign}{realized_pnl:>14,.2f}  ({realized_sign}{realized_pct:.2f}%)")
+        print(f"  │")
+        print(f"  └─ 💰 现金分红:")
+        print(f"      总收入:      {cash_div_symbol} ${cash_div_sign}{cash_div:>14,.2f}")
+        print()
+        print(f"  ═══════════════════════════════════════════════════════════════════")
+        print()
+
+    # 绘制ASCII图表
+    _print_pnl_chart(storage)
+
     print("\n" + "="*80)
 
 
@@ -1076,6 +1575,26 @@ def build_parser() -> argparse.ArgumentParser:
     sales.add_argument('-s', '--symbol', help='可选，指定股票代码')
     sales.add_argument('-v', '--verbose', action='store_true')
     sales.set_defaults(func=cmd_sales)
+
+    # dividend - 记录分红
+    dividend = sub.add_parser('dividend', help='记录股票分红（现金或股票再投资）')
+    dividend.add_argument('-s', '--symbol', required=True, help='股票代码')
+    dividend.add_argument('-d', '--date', required=True, help='分红日期 YYYY-MM-DD')
+    dividend.add_argument('-t', '--type', required=True, choices=['cash', 'stock', 'CASH', 'STOCK'],
+                         help='分红类型：cash=现金分红, stock=股票再投资(DRIP)')
+    dividend.add_argument('-a', '--amount', type=float, help='每股分红金额（现金分红时必需）')
+    dividend.add_argument('--shares', type=float, help='持有股数（现金分红）或再投资股数（股票分红）')
+    dividend.add_argument('--reinvest-price', type=float, help='再投资价格（股票分红时必需）')
+    dividend.add_argument('--platform', help='平台')
+    dividend.add_argument('--notes', help='备注')
+    dividend.add_argument('-v', '--verbose', action='store_true')
+    dividend.set_defaults(func=cmd_dividend)
+
+    # dividends - 查看分红记录
+    dividends = sub.add_parser('dividends', help='查看分红记录')
+    dividends.add_argument('-s', '--symbol', help='可选，指定股票代码')
+    dividends.add_argument('-v', '--verbose', action='store_true')
+    dividends.set_defaults(func=cmd_dividends)
 
     return p
 

@@ -44,20 +44,20 @@ class PortfolioService:
     def get_portfolio_summary(self, as_of_date: str = None) -> Dict[str, Any]:
         """
         获取投资组合摘要
-        
+
         Args:
             as_of_date: 截止日期（YYYY-MM-DD格式），如果为None则使用今天
-            
+
         Returns:
             Dict: 投资组合摘要信息
         """
         if as_of_date is None:
             as_of_date = date.today().strftime('%Y-%m-%d')
-        
+
         self.logger.info(f"获取投资组合摘要: 截止 {as_of_date}")
-        
-        # 获取当前持仓
-        positions = self.transaction_service.get_current_positions()
+
+        # 获取截止到指定日期的持仓（修复bug：不再获取所有当前持仓）
+        positions = self.transaction_service.get_positions_as_of_date(as_of_date)
         
         if not positions:
             return {
@@ -82,16 +82,16 @@ class PortfolioService:
             )
             
             if price_info:
-                market_price = price_info[1]
-                market_value = position.quantity * market_price
-                unrealized_pnl = market_value - position.total_cost
-                unrealized_pnl_pct = (unrealized_pnl / position.total_cost * 100) if position.total_cost > 0 else 0.0
+                market_price = float(price_info[1])
+                market_value = float(position.quantity) * market_price
+                unrealized_pnl = market_value - float(position.total_cost)
+                unrealized_pnl_pct = (unrealized_pnl / float(position.total_cost) * 100) if position.total_cost > 0 else 0.0
                 
                 position_summary = {
                     'symbol': position.symbol,
-                    'quantity': position.quantity,
-                    'avg_cost': position.avg_cost,
-                    'total_cost': position.total_cost,
+                    'quantity': float(position.quantity),
+                    'avg_cost': float(position.avg_cost),
+                    'total_cost': float(position.total_cost),
                     'market_price': market_price,
                     'market_value': market_value,
                     'unrealized_pnl': unrealized_pnl,
@@ -100,15 +100,15 @@ class PortfolioService:
                     'last_transaction_date': position.last_transaction_date
                 }
                 
-                total_cost += position.total_cost
+                total_cost += float(position.total_cost)
                 total_market_value += market_value
             else:
                 # 无价格数据
                 position_summary = {
                     'symbol': position.symbol,
-                    'quantity': position.quantity,
-                    'avg_cost': position.avg_cost,
-                    'total_cost': position.total_cost,
+                    'quantity': float(position.quantity),
+                    'avg_cost': float(position.avg_cost),
+                    'total_cost': float(position.total_cost),
                     'market_price': None,
                     'market_value': None,
                     'unrealized_pnl': None,
@@ -117,8 +117,8 @@ class PortfolioService:
                     'last_transaction_date': position.last_transaction_date,
                     'note': '无价格数据'
                 }
-                
-                total_cost += position.total_cost
+
+                total_cost += float(position.total_cost)
             
             position_summaries.append(position_summary)
         
@@ -280,6 +280,12 @@ class PortfolioService:
             detailed_risk
         )
         
+        # 获取已实现盈亏
+        realized_gains = self.get_realized_gains()
+
+        # 计算总体投资表现（包含当前持仓和已卖出股票）
+        overall_performance = self._calculate_overall_performance(basic_summary, realized_gains)
+
         # 分析结果
         analysis = {
             'analysis_date': as_of_date,
@@ -290,9 +296,11 @@ class PortfolioService:
             'performance_analysis': self._analyze_performance(basic_summary['positions']),
             'historical_performance': historical_performance,
             'strategy_insights': strategy_insights,
-            'recommendations': self._generate_recommendations(basic_summary['positions'], basic_summary['total_cost'])
+            'recommendations': self._generate_recommendations(basic_summary['positions'], basic_summary['total_cost']),
+            'realized_gains': realized_gains,
+            'overall_performance': overall_performance
         }
-        
+
         return analysis
 
     def _empty_enhanced_analysis(self, as_of_date: str) -> Dict[str, Any]:
@@ -505,7 +513,11 @@ class PortfolioService:
                 pl.symbol,
                 pl.original_quantity,
                 pl.cost_basis,
-                pl.original_quantity * pl.cost_basis as cost,
+                CASE
+                    -- 排除DRIP批次的成本
+                    WHEN t.notes LIKE '%Dividend Reinvestment%' THEN 0
+                    ELSE pl.original_quantity * pl.cost_basis
+                END as cost,
                 CASE
                     WHEN pl.portfolio_id = 1 THEN 'Merrill Edge'
                     WHEN pl.portfolio_id = 2 THEN 'Schwab'
@@ -513,17 +525,16 @@ class PortfolioService:
                         (SELECT CASE
                             WHEN t.platform LIKE '%ml%' OR t.platform = 'ml' THEN 'Merrill Edge'
                             WHEN t.platform LIKE '%schwab%' OR t.platform = 'schwab' THEN 'Schwab'
-                            ELSE t.platform
+                            ELSE COALESCE(t.platform, 'Unknown')
                         END
-                        FROM transactions t
-                        WHERE t.symbol = pl.symbol
-                        AND t.quantity = pl.original_quantity
-                        AND t.price = pl.cost_basis
+                        FROM transactions t2
+                        WHERE t2.id = pl.transaction_id
                         LIMIT 1),
                         'Unknown'
                     )
                 END as platform
             FROM position_lots pl
+            LEFT JOIN transactions t ON pl.transaction_id = t.id
             WHERE pl.is_closed = 0
             ORDER BY pl.symbol, platform
             """
@@ -554,18 +565,18 @@ class PortfolioService:
         """计算风险指标"""
         if not positions or total_cost <= 0:
             return {'message': '无法计算风险指标'}
-        
-        # 计算集中度风险
-        max_position_cost = max(pos['total_cost'] for pos in positions)
-        concentration_risk = max_position_cost / total_cost
+
+        # 计算集中度风险（确保类型一致）
+        max_position_cost = float(max(pos['total_cost'] for pos in positions))
+        concentration_risk = max_position_cost / float(total_cost)
         
         # 获取最大持仓
-        max_position = max(positions, key=lambda x: x['total_cost'])
-        
+        max_position = max(positions, key=lambda x: float(x['total_cost']))
+
         # 计算前三大持仓比例
-        sorted_positions = sorted(positions, key=lambda x: x['total_cost'], reverse=True)
-        top3_cost = sum(pos['total_cost'] for pos in sorted_positions[:3])
-        top3_concentration = top3_cost / total_cost
+        sorted_positions = sorted(positions, key=lambda x: float(x['total_cost']), reverse=True)
+        top3_cost = sum(float(pos['total_cost']) for pos in sorted_positions[:3])
+        top3_concentration = top3_cost / float(total_cost)
         
         # 风险等级评估
         risk_level = '低'
@@ -579,7 +590,7 @@ class PortfolioService:
             'max_position': {
                 'symbol': max_position['symbol'],
                 'concentration': concentration_risk,
-                'amount': max_position['total_cost']
+                'amount': float(max_position['total_cost'])
             },
             'top3_concentration': top3_concentration,
             'risk_level': risk_level,
@@ -669,10 +680,13 @@ class PortfolioService:
             for pos in positions:
                 symbol = pos['symbol']  # 直接使用原始symbol，不添加.US后缀
                 
-                # 获取加权平均成本作为入场价格 - 修正cost_basis为每股价格的问题
+                # 获取加权平均成本作为入场价格 - 排除DRIP交易
                 actual_entry_price_query = """
-                SELECT SUM(cost_basis * original_quantity)/SUM(original_quantity) as avg_price FROM position_lots
-                WHERE symbol = ? AND remaining_quantity > 0
+                SELECT SUM(pl.cost_basis * pl.original_quantity)/SUM(pl.original_quantity) as avg_price
+                FROM position_lots pl
+                LEFT JOIN transactions t ON pl.transaction_id = t.id
+                WHERE pl.symbol = ? AND pl.remaining_quantity > 0
+                AND (t.notes IS NULL OR t.notes NOT LIKE '%Dividend Reinvestment%')
                 """
                 entry_result = self.storage.cursor.execute(actual_entry_price_query, (symbol,)).fetchone()
                 actual_entry_price = float(entry_result[0]) if entry_result else None
@@ -732,16 +746,16 @@ class PortfolioService:
             if sector not in sectors:
                 sectors[sector] = {'count': 0, 'value': 0}
             sectors[sector]['count'] += 1
-            sectors[sector]['value'] += pos['total_cost']
-        
+            sectors[sector]['value'] += float(pos['total_cost'])
+
         # 行业集中度
         sector_concentrations = {
-            sector: data['value'] / total_cost 
+            sector: float(data['value']) / float(total_cost)
             for sector, data in sectors.items()
         }
-        
+
         max_sector = max(sector_concentrations.items(), key=lambda x: x[1])
-        
+
         # 计算组合贝塔（简化版）
         volatility_scores = {
             'LULU': 1.3,  # 高波动性个股
@@ -751,9 +765,9 @@ class PortfolioService:
             'SPY': 1.0,   # 市场基准
             'URTH': 0.9   # 全球分散化
         }
-        
+
         weighted_volatility = sum(
-            volatility_scores.get(pos['symbol'], 1.0) * (pos['total_cost'] / total_cost)
+            volatility_scores.get(pos['symbol'], 1.0) * (float(pos['total_cost']) / float(total_cost))
             for pos in positions
         )
         
@@ -1015,5 +1029,139 @@ class PortfolioService:
         pnl_data = self.storage.get_daily_pnl(
             symbol, start_date=start_date, end_date=end_date
         )
-        
+
         return [DailyPnL.from_dict(data) for data in pnl_data]
+
+    def get_realized_gains(self) -> Dict[str, Any]:
+        """
+        获取已实现盈亏汇总
+
+        Returns:
+            Dict: 包含已卖出股票的盈亏信息
+        """
+        query = """
+            SELECT
+                t.symbol,
+                s.company_name,
+                st.sector,
+                st.industry,
+                t.transaction_date as sale_date,
+                SUM(sa.quantity_sold) as total_quantity_sold,
+                SUM(sa.cost_basis) as total_cost_basis,
+                SUM(sa.quantity_sold * sa.sale_price) as total_sale_proceeds,
+                SUM(sa.realized_pnl) as total_realized_pnl,
+                (SUM(sa.realized_pnl) / SUM(sa.cost_basis) * 100) as realized_pnl_pct
+            FROM sale_allocations sa
+            JOIN transactions t ON sa.sale_transaction_id = t.id
+            LEFT JOIN stocks s ON t.symbol = s.symbol
+            LEFT JOIN stocks st ON t.symbol = st.symbol
+            WHERE t.transaction_type = 'SELL'
+            GROUP BY t.symbol, t.transaction_date, s.company_name, st.sector, st.industry
+            ORDER BY t.transaction_date DESC
+        """
+
+        result = self.storage.connection.execute(query).fetchall()
+
+        realized_sales = []
+        total_realized_pnl = 0.0
+        total_cost_basis = 0.0
+        total_proceeds = 0.0
+
+        for row in result:
+            sale_info = {
+                'symbol': row[0],
+                'company_name': row[1] or row[0],
+                'sector': row[2] or '未知',
+                'industry': row[3] or '未知',
+                'sale_date': row[4],
+                'quantity_sold': row[5],
+                'cost_basis': row[6],
+                'sale_proceeds': row[7],
+                'realized_pnl': row[8],
+                'realized_pnl_pct': row[9] if row[9] else 0.0
+            }
+            realized_sales.append(sale_info)
+            total_realized_pnl += row[8] or 0.0
+            total_cost_basis += row[6] or 0.0
+            total_proceeds += row[7] or 0.0
+
+        return {
+            'sales': realized_sales,
+            'summary': {
+                'total_sales': len(realized_sales),
+                'total_cost_basis': total_cost_basis,
+                'total_proceeds': total_proceeds,
+                'total_realized_pnl': total_realized_pnl,
+                'average_return_pct': (total_realized_pnl / total_cost_basis * 100) if total_cost_basis > 0 else 0.0
+            }
+        }
+
+    def _get_total_cash_dividends(self) -> float:
+        """获取现金分红总额"""
+        try:
+            query = """
+                SELECT SUM(total_cash_received) as total_cash
+                FROM dividends
+                WHERE dividend_type = 'CASH'
+            """
+            result = self.storage.connection.execute(query).fetchone()
+            return float(result[0]) if result and result[0] else 0.0
+        except Exception as e:
+            self.logger.warning(f"获取现金分红总额失败: {e}")
+            return 0.0
+
+    def _calculate_overall_performance(self, basic_summary: Dict[str, Any], realized_gains: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        计算总体投资表现（包含当前持仓和已卖出股票）
+
+        Args:
+            basic_summary: 当前持仓摘要
+            realized_gains: 已实现盈亏数据
+
+        Returns:
+            Dict: 总体投资表现数据
+        """
+        # 当前持仓数据
+        current_cost = basic_summary.get('total_cost', 0.0)
+        current_market_value = basic_summary.get('total_market_value', 0.0)
+        current_unrealized_pnl = basic_summary.get('total_unrealized_pnl', 0.0)
+
+        # 已实现数据（卖出股票）
+        realized_summary = realized_gains.get('summary', {})
+        realized_cost = realized_summary.get('total_cost_basis', 0.0)
+        realized_proceeds = realized_summary.get('total_proceeds', 0.0)
+        realized_pnl = realized_summary.get('total_realized_pnl', 0.0)
+
+        # 现金分红（纯盈利，不涉及成本）
+        cash_dividends = self._get_total_cash_dividends()
+
+        # 总体数据（关注当前持仓状态）
+        total_invested = current_cost  # 累计投入 = 当前持仓成本（不含已卖出股票）
+        total_current_value = current_market_value  # 当前总价值 = 当前持仓市值（不含卖出收入）
+        total_pnl = current_unrealized_pnl + realized_pnl + cash_dividends  # 总盈亏 = 未实现 + 已实现 + 现金分红
+        total_return_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0.0
+
+        return {
+            'total_invested': total_invested,  # 累计投入
+            'total_current_value': total_current_value,  # 当前总价值
+            'total_pnl': total_pnl,  # 总盈亏
+            'total_return_pct': total_return_pct,  # 总收益率
+            'cash_dividends': cash_dividends,  # 现金分红总额
+            'breakdown': {
+                'current_holdings': {
+                    'cost': current_cost,
+                    'market_value': current_market_value,
+                    'unrealized_pnl': current_unrealized_pnl,
+                    'unrealized_pnl_pct': basic_summary.get('total_unrealized_pnl_pct', 0.0)
+                },
+                'realized_sales': {
+                    'cost': realized_cost,
+                    'proceeds': realized_proceeds,
+                    'realized_pnl': realized_pnl,
+                    'realized_pnl_pct': realized_summary.get('average_return_pct', 0.0)
+                },
+                'cash_dividends': {
+                    'total_cash': cash_dividends
+                }
+            }
+        }
