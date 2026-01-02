@@ -5,6 +5,7 @@
 """
 
 import logging
+from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 
@@ -211,17 +212,30 @@ class LotPnLCalculator:
                 price_info = price_cache.get((symbol, date))
                 if not price_info:
                     continue
-                
+
                 market_price, price_date, is_stale = price_info
-                
-                # 计算基于批次的未实现盈亏
-                unrealized_pnl = self.calculate_unrealized_pnl_by_lots(lots, market_price)
-                
+
+                # 过滤出在当前日期之前已购买的批次
+                active_lots_on_date = [lot for lot in lots if lot.purchase_date <= date]
+                if not active_lots_on_date:
+                    continue  # 该日期没有持仓，跳过
+
                 # 计算加权平均成本和其他指标
-                total_quantity = sum(lot.remaining_quantity for lot in lots)
-                total_cost = sum(lot.total_cost for lot in lots)
-                avg_cost = total_cost / total_quantity if total_quantity > Decimal('0') else Decimal('0.0')
+                # 注意：市值包含所有批次（含DRIP），但成本只计算非DRIP批次
+                total_quantity = sum(lot.remaining_quantity for lot in active_lots_on_date)
                 market_value = total_quantity * market_price
+
+                # 排除DRIP批次的成本（DRIP是用分红买的，不是自己投入的钱）
+                def is_drip(lot):
+                    return lot.notes and 'Dividend Reinvestment' in lot.notes
+
+                non_drip_lots = [lot for lot in active_lots_on_date if not is_drip(lot)]
+                total_cost = sum(lot.total_cost for lot in non_drip_lots)
+                non_drip_quantity = sum(lot.remaining_quantity for lot in non_drip_lots)
+                avg_cost = total_cost / non_drip_quantity if non_drip_quantity > Decimal('0') else Decimal('0.0')
+
+                # 未实现盈亏 = 市值(所有股份) - 成本(排除DRIP)
+                unrealized_pnl = market_value - total_cost
                 unrealized_pnl_pct = (unrealized_pnl / total_cost) if total_cost > Decimal('0') else Decimal('0.0')
                 
                 # 获取当日已实现盈亏
@@ -288,7 +302,8 @@ class LotPnLCalculator:
                 purchase_date=lot_data['purchase_date'],
                 is_closed=bool(lot_data['is_closed']),
                 created_at=datetime.fromisoformat(lot_data.get('created_at', '')) if lot_data.get('created_at') else None,
-                updated_at=datetime.fromisoformat(lot_data.get('updated_at', '')) if lot_data.get('updated_at') else None
+                updated_at=datetime.fromisoformat(lot_data.get('updated_at', '')) if lot_data.get('updated_at') else None,
+                notes=lot_data.get('notes')  # 包含notes用于识别DRIP
             )
             lots.append(lot)
         return lots

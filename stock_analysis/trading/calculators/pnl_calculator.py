@@ -128,10 +128,12 @@ class PnLCalculator:
             symbols, start_date, end_date, self.price_field, self.only_trading_days
         )
         
-        # 统计结果
+        # 保存结果到数据库
         calculated_records = 0
-        for symbol_results in result_by_symbol.values():
-            calculated_records += len(symbol_results)
+        for symbol, symbol_results in result_by_symbol.items():
+            for daily_pnl in symbol_results:
+                self.lot_calculator.save_daily_pnl(daily_pnl)
+                calculated_records += 1
         
         # 计算总天数
         date_range = self._generate_date_range(start_date, end_date)
