@@ -652,15 +652,20 @@ def _print_pnl_chart(storage):
         # 反转顺序（从旧到新）
         rows = list(reversed(rows))
 
-        # 每隔3天采样一个点
-        sampled_rows = [rows[i] for i in range(0, len(rows), 3)]
+        # 每周一、三、五采样
+        from datetime import datetime
+        def is_mon_wed_fri(date_str):
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            return dt.weekday() in (0, 2, 4)  # 0=周一, 2=周三, 4=周五
+
+        sampled_rows = [row for row in rows if is_mon_wed_fri(row[0])]
 
         dates = [row[0] for row in sampled_rows]
         ratios = [row[1] for row in sampled_rows]
         pnls = [row[2] for row in sampled_rows]
 
         # 打印图表标题
-        print("\n📈 近180天盈亏比例趋势（每3天采样）")
+        print("\n📈 近180天盈亏比例趋势（每周一、三、五采样）")
         print("=" * 80)
 
         # 计算图表参数
