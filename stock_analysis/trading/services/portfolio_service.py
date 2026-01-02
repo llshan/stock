@@ -4,13 +4,9 @@
 提供投资组合管理和分析功能
 """
 
-import os
-import json
 import logging
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any
-
-import openai
 
 from ...data.storage import create_storage
 from ..models.portfolio import Position, DailyPnL
@@ -32,14 +28,6 @@ class PortfolioService:
         self.config = config
         self.transaction_service = TransactionService(storage, config)
         self.logger = logging.getLogger(__name__)
-        
-        # 初始化OpenAI客户端
-        api_key = os.getenv('OPENAI_API_KEY')
-        if api_key:
-            self.openai_client = openai.OpenAI(api_key=api_key)
-        else:
-            self.openai_client = None
-            self.logger.warning("未设置OPENAI_API_KEY环境变量，将使用默认策略洞察")
     
     def get_portfolio_summary(self, as_of_date: str = None) -> Dict[str, Any]:
         """
@@ -806,131 +794,9 @@ class PortfolioService:
         }
         return sector_map.get(symbol, '其他')
 
-    def _generate_strategy_insights(self, positions: List[Dict], total_cost: float, 
+    def _generate_strategy_insights(self, positions: List[Dict], total_cost: float,
                                   historical_performance: Dict, risk_assessment: Dict) -> Dict[str, Any]:
         """生成投资策略洞察"""
-        
-        if self.openai_client:
-            return self._generate_ai_strategy_insights(positions, total_cost, historical_performance, risk_assessment)
-        else:
-            return self._generate_default_strategy_insights(positions, total_cost, historical_performance, risk_assessment)
-
-    def _generate_ai_strategy_insights(self, positions: List[Dict], total_cost: float, 
-                                     historical_performance: Dict, risk_assessment: Dict) -> Dict[str, Any]:
-        """使用OpenAI API生成投资策略洞察"""
-        try:
-            # 构建投资组合数据摘要
-            positions_data = []
-            data_validation_summary = []
-
-            for pos in positions:
-                pos_data = {
-                    "symbol": pos['symbol'],
-                    "shares": pos.get('shares', pos.get('quantity', 0)),
-                    "cost_basis_per_share": pos['avg_cost'],  # 每股平均成本
-                    "total_cost_basis": pos['total_cost'],  # 总投资成本
-                    "current_market_value": pos.get('market_value', pos['total_cost']),  # 当前市值
-                    "weight": pos['total_cost'] / total_cost,
-                    "unrealized_pnl_pct": pos.get('unrealized_pnl_pct', 0),
-                    "sector": self._get_sector_for_symbol(pos['symbol'])
-                }
-                positions_data.append(pos_data)
-                # 动态构建数据验证摘要
-                pnl_pct = pos.get('unrealized_pnl_pct', 0)
-                data_validation_summary.append(f"{pos['symbol']}={pnl_pct:.2f}%")
-
-            portfolio_data = {
-                "total_portfolio_value": total_cost,
-                "positions": positions_data,
-                "risk_metrics": {
-                    "sector_concentration": risk_assessment.get('sector_analysis', {}),
-                    "volatility_score": risk_assessment.get('volatility_analysis', {}).get('portfolio_volatility_score', 1.0)
-                },
-                "performance": historical_performance
-            }
-
-            # 动态生成数据验证字符串
-            validation_text = ", ".join(data_validation_summary)
-
-            prompt = f"""
-作为专业的投资顾问，请分析以下投资组合数据并提供策略洞察。
-
-投资组合数据：
-{json.dumps(portfolio_data, ensure_ascii=False, indent=2)}
-
-请以JSON格式返回分析结果，包含以下字段：
-- strengths: 投资组合优势列表（3-5个要点）
-- improvements: 需要改进的领域列表（2-4个要点）
-- recommendations: 具体投资建议列表（3-5个建议）
-- overall_score: 总体评分（60-100分）
-- grade: 等级评定（A, A-, B+, B, B-, C+）
-- summary: 一句话总结
-
-重要注意事项：
-1. **必须严格使用提供的实际数据**，特别是每只股票的收益率，不得修改或编造任何数字
-2. **数据验证参考**：{validation_text} - 这些是唯一准确的收益率数值
-3. 禁止使用任何未在上述数据中出现的收益率数字
-4. 建议要具体且可操作
-5. 考虑风险分散、行业配置、投资表现等因素
-6. 使用中文回复
-"""
-
-            system_prompt = """你是一位资深投资组合分析师，拥有15年+买方机构投资经验，曾在顶级对冲基金和资产管理公司工作。
-
-## 核心能力
-- **投资组合优化**：精通马科维茨理论、资本资产定价模型(CAPM)、夏普比率等现代投资组合理论
-- **风险量化分析**：擅长计算和解读VaR、最大回撤、贝塔系数、波动率、集中度风险等关键指标
-- **行业轮动策略**：深刻理解经济周期与行业相关性，能识别防御性、周期性、成长性板块的配置时机
-- **数据驱动决策**：基于历史表现、估值水平、技术面综合分析，给出量化支持的投资建议
-
-## 分析准则（必须严格遵守）
-1. **数据真实性第一**：使用且仅使用提供的实际数字，收益率必须精确到小数点后两位，禁止任何形式的数字编造、四舍五入或"优化"
-2. **客观中立**：以第三方视角评估，优势与风险并重，不偏袒任何观点
-3. **建议可执行**：每条建议必须具体明确（如"将LULU仓位从18%降至12%"），避免模糊表述（如"适当减仓"）
-4. **专业术语规范**：使用投资界标准术语，中英文对照准确
-
-## 输出要求
-- 优势（strengths）：基于数据的客观优点，3-5条
-- 改进领域（improvements）：当前存在的具体问题和风险点，2-4条
-- 投资建议（recommendations）：可立即执行的具体操作建议，3-5条，包含明确的股票代码和目标仓位
-- 总体评分（overall_score）：60-100分，基于风险收益平衡、分散化程度、行业配置合理性综合评定
-- 等级评定（grade）：A, A-, B+, B, B-, C+，对应不同评分区间
-- 一句话总结（summary）：高度概括投资组合的核心特征和主要问题"""
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=1000
-            )
-            
-            ai_response = response.choices[0].message.content
-            
-            # 尝试解析JSON响应
-            try:
-                # 提取JSON部分
-                start_idx = ai_response.find('{')
-                end_idx = ai_response.rfind('}') + 1
-                if start_idx != -1 and end_idx != 0:
-                    json_str = ai_response[start_idx:end_idx]
-                    insights = json.loads(json_str)
-                    return insights
-                else:
-                    raise ValueError("无法找到有效的JSON响应")
-            except (json.JSONDecodeError, ValueError) as e:
-                self.logger.warning(f"AI响应JSON解析失败: {e}, 使用默认策略")
-                return self._generate_default_strategy_insights(positions, total_cost, historical_performance, risk_assessment)
-                
-        except Exception as e:
-            self.logger.error(f"OpenAI API调用失败: {e}")
-            return self._generate_default_strategy_insights(positions, total_cost, historical_performance, risk_assessment)
-
-    def _generate_default_strategy_insights(self, positions: List[Dict], total_cost: float, 
-                                          historical_performance: Dict, risk_assessment: Dict) -> Dict[str, Any]:
-        """默认的策略洞察生成逻辑（作为AI调用失败时的备选方案）"""
         
         strengths = []
         improvements = []
